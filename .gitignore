@@ -34,3 +34,6 @@ Thumbs.db
 *.tmp
 *.log
 
+*data/
+*things_similarity/
+*things_objects_and_images/
