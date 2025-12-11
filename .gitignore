@@ -18,6 +18,8 @@ models/*.pkl
 models/*.npy
 models/*.txt
 models/*.json
+results/
+*.pt
 
 # IDE
 .vscode/
@@ -39,3 +41,5 @@ Thumbs.db
 *things_objects_and_images/
 
 *brain_chapter/
+
+*models/
