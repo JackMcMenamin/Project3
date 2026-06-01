@@ -1,0 +1,1069 @@
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+7 Analysing and Improving Transformer Model Representations with Brain Data
+In my final technical chapter I move from post-hoc layerwise analysis of existing Transformer
+model representations (as explored in Chapters 4, 5 and 6) to actively inducing desired representational properties. Here, I introduce a novel regularisation method, Representational Similarity
+Regularisation (RSR), which is inspired by the RSA framework and aims to align Transformer
+model representations with a target pattern. In this chapter I calculate the target pattern from
+fMRI signals recorded in human participants who were listening to a natural language story.
+My approach aims to increase the cognitive alignment of large language models, in the sense
+of inducing cognitively relevant representational similarity patterns in the model activations,
+directly addressing the thesis’s overarching aim of guiding model development with cognitive
+signals.
+I formulate a semantic textual similarity (STS) task for long text spans, with ground truth
+derived from a state-of-the-art STS model, using text from a story that has accompanying fMRI
+brain data. I then apply RSR to align the similarity ratings derived from the Transformer model
+with the similarity between brain signals for the same text. I carry out a comprehensive range of
+experiments, varying RSR’s hyperparameters, including regularisation strength, hidden vector
+size of the output representation layer, batch size, learning rate, and the brain parcellation
+strategy used to select relevant fMRI regions. Across these experiments, I report test correlations
+for RSR models trained on each of 13 participants’ fMRI signals. My results demonstrate that
+RSR leads to improved performance on both our main long-span STS task and a separate STS
+benchmark when aligned with fMRI data from specific participants.
+137
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+7.1 Introduction
+In previous chapters we have used Representational Similarity Analysis to measure the correlation
+between model-elicited vector representations (e.g. mean-pooled token vector representations
+from BERT for a given word or token span) and a relevant ground-truth semantic or syntactic
+representational dissimilarity matrix (e.g. noun-noun compound relation type). In both our
+previous work and other published work on using RSA for analysing NLP models, this approach
+has proven effective for generating interpretable insights into the representation of linguistic
+phenomena in large language models. We now wish to use the framework of representational
+similarity to directly fine-tune large language models by incorporating the correlation between
+representational dissimilarity matrices into the loss function. If we take a task T (e.g. predicting
+similarity between sentence pairs) with an associated loss function LT (e.g. mean-scored error
+between the predicted and ground-truth sentence similarity), we expect our model to improve at
+task T if we attempt to minimise LT. While training neural networks it is common practice to
+introduce an additional regularisation term in order to positively influence training. Typically the
+goal of regularisation is to reduce the effect of overfitting and improve the ability of the model to
+generalise its predictions to unseen data. We propose Representational Similarity Regularisation
+(RSR), an approach to model regularisation that penalises a model for not representing a given
+second-order target pattern in its intermediate hidden vectors. We hypothesise that minimising
+the representation regularisation term will also improve the model’s performance at task T if
+the representational target has information relevant to accomplishing task T. For example, if we
+train a multi-layer perceptron to predict house prices from the amount of rooms and the average
+square-footage of all rooms, we could take the houses in the training data and construct an RDM
+that represents the difference between pairs of houses based on the age of the house. If older
+houses in our dataset generally have more rooms and larger rooms than the more recently built
+houses, we may find that model-elicited internal representation RDM already weakly correlates
+with an RDM constructed using pair-wise representations of house age. If we fine-tune these
+representations to more explicitly represent the age of the house as a distributed representational
+pattern across the network, we would expect that these representations would be more useful for
+predicting house prices, as they have been enriched with task-relevant information. While our
+proposed regularisation schema shares some similarities with multi-task learning, it differs in
+its primary focus. Unlike multi-task learning, which aims to improve performance on multiple
+tasks, RSR is specifically designed to enhance a model’s internal representations by aligning
+138
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+them with a target pattern.
+7.1.1 Background
+Most relevant to the current work is the body of research comparing human language processing
+to artificial language models. It has been extensively demonstrated that large language models
+can predict brain recordings of human subjects engaging in language comprehension tasks
+(Merlin & Toneva, 2022; Schrimpf et al., 2021). Prior to the advent of Transformer models,
+this work mainly focused on word embeddings and recurrent neural networks. For example,
+work by Wehbe et al. (2014), who found that the next word probability computed by neural
+networks agrees with the brain’s own assessment of word probability, and Huth et al. (2016)
+found that word embeddings derived from co-occurence information could be used to map
+semantic representations across the celebral cortex using fMRI. Work by Anderson et al. (2017)
+showed that text-based computational models could be used to decode fMRI activity for both
+concrete and abstract concepts, while visually grounded models were only effective for concrete
+ones. Later work by Jain and Huth (2018) showed that LSTM-based embeddings improved
+the prediction of fMRI signals compared to earlier methods. Other research by Ruan et al.
+(2016) found that skip-gram word embeddings showed significant correlations with fMRI data
+from all brain lobes except the occipital lobe. More recently there has been an explosion in
+the amount of research examining the extent to which Transformer models align with human
+language processing (Oota et al., 2024). Goldstein et al. (2022) found that brain representations
+(extracted from ECoG recording) share a similar geometric structure (i.e. the relative distances
+and angles between data points in their respective high-dimensional spaces) to contextualised
+embeddings extracted from a large Transformer model. Of particular relevance to the current
+work is Schwartz et al. (2019) who found that fine-tuning a BERT model to predict brain activity
+recordings of people reading text leads to representations that encode more brain-activity-relevant
+language information.
+Building upon the existing evidence and fostering alignment between human and artificial
+neural networks, the current work introduces a regularisation technique that explicitly encourages
+the model’s representation of natural language semantics to be more consistent with human brain
+activity recording during a language comprehension task.
+139
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+7.2 A Representational Similarity Regularisation Methodology
+For a task T, we define a two-part loss function incorporating both the primary task loss LT and
+the representational similarity regularisation term RRS. The final loss function is a weighted
+sum of these two terms, where the weight factor determines the relative importance placed on
+optimising for task-specific performance and encouraging the model’s internal representations
+with the similarity structure defined by the target pattern. First, we will define the representation
+similarity regularisation term:
+RRS(Xb) = 1−sp(RSMθ (Xb),RSMT Pb
+) (1)
+where
+• sp(·,·) is a differentiable implementation of Spearman’s rank correlation coefficient
+• RSMθ (Xb) is the Model Representational Similarity Matrix (RSM) constructed for the
+batch Xb using intermediate model representation vectors θ (e.g. intermediary hidden
+vectors given input Xb)
+• RSMT Pb
+is the target RSM constructed using the target pattern associated with Xb
+We construct the Representational Similarity Matrix for a given set of inputs X of length n
+by constructing a matrix representing the cosine similarity Sc(·,·) between each pair, only taking
+the upper triangle excluding the main diagonal:
+RSMX =
+
+
+Sc(X1,X2) ... Sc(X1,Xn)
+.
+.
+.
+.
+.
+.
+Sc(Xn−1,Xn)
+
+
+We can then minimise the following loss for a batch of inputs:
+Lb = (1−λ)LT (Xb) +λRRS(Xb) (2)
+where:
+• LT (Xb): Task loss for the batch
+140
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+• RRS(Xb): Representational similarity regularisation term for the batch
+• λ ∈ [0,1] : Regularisation strength (weighting factor between the task loss and the representational similarity regularisation term)
+7.3 Data and Methods
+7.3.1 Model
+During our experiments we primarily use a standard pre-trained version of BERT, bert-baseuncased. We also examine the effect of starting with another version of BERT (textattack/bertbase-uncased-STS-B) that has been pre-trained on a relevant STS task. We provide pairs of
+sentences in the format of “[CLS] Sentence A [SEP] Sentence B [END]. We then extract 768-
+dimensional sentence embeddings by mean-pooling over token vectors in Sentence A and
+Sentence B. We then project the two sentence embeddings into a lower dimensional space. The
+decision to introduce this linear projection was primarily made under the assumption that it
+would be more difficult to enforce similarity constraints in higher-dimensional spaces. The final
+sentence similarity is measured as the cosine similarity between these two sentence embeddings.
+7.3.2 Narratives fMRI Dataset
+Using our Representational Similarity Regularisation framework we will apply representational
+pressure to a Transformer model in order to encourage alignment between its internal representations and a representation extracted from human brain readings. To this end, we use the
+Narratives dataset (Nastase et al., 2021), which features brain scans of 345 participants as they
+listened to narrative stories. We use the “Slumlord” story from the Narratives dataset. This subset
+of the dataset is comprised of 18 participants (aged 18–27, mean age 21 years, 8 female). Due to
+technical constraints, the present study analysed data from 13 subjects. This story is made of
+2,715 words.
+The fMRI recordings for the Slumlord story are segmented into a sequence of 601 functional
+volumes each corresponding to a duration (repetition time, TR) of 1.5 seconds each. We follow
+Kumar et al. (2024) in extracting text across windows of 20 TRs in order to retrieve longer
+sections of text, providing 30 seconds of preceding context to each fMRI time-step. This results
+in 581 sequences of natural text. We take the first two thirds of the story (387 sentences) as
+training data and the final third (194 sentences) as the test data.
+141
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+7.3.3 Training and Evaluation
+During training, for each epoch we randomly segment our 387 sentences into batches of batch
+size b, leaving us with ⌊
+387
+b
+⌋ batches. In each of our experiments we take the primary task T as
+predicting the semantic similarity between pairs of sentences in the given batch. The ground-truth
+semantic similarity for each pair was pre-computed by taking the cosine-similarity between
+text-embedding-ada-002 embeddings. These embeddings achieve a competitive performance
+(correlation=0.82) on the SentEval 2012-2016 sentence similarity task. We based our analysis on
+the preprocessing pipeline developed by Kumar et al. (2024) to handle factors like haemodynamic
+lag and other neurophysiological complexities. We followed the analysis code from their publicly
+available GitHub repository6
+. Evaluation on the test-set is carried out on batches with the same
+batch size as in training and is the correlation between the model predictions and the ground
+truth semantic similarity (as measured by Pearson’s r).
+7.3.4 Parcellation and Region of Interest (ROI) Filtering
+Parcellation involves splitting a brain image into distinct regions for analysis, allowing researchers
+to investigate functional specificity within the brain. Activity patterns in specific regions of
+interest (ROIs), also called parcels, can reflect different aspects of neurocognitive function, such
+as specific subprocesses of vision or linguistic representation. Brain parcellations range from
+high-level segmentations (e.g. Yeo-7 with 7 regions) to very detailed views with thousands of
+ROIs (e.g. DS16784). In our study, we follow Kumar et al. (2024) and use the Schaefer et al.
+(2018) local-global parcellation procedure to segment the brain images into 1000 spatial parcels
+after normalising the brain images to a canonical form. This relatively fine-grained approach
+allows us to investigate the brain’s representation of input stimuli with a relatively rich level of
+spatial detail.
+The 1000 parcels from the Schaeffer parcellation scheme cover the entire cortex, including
+brain regions that are unlikely to be involved in linguistic processing and therefore unlikely to
+contain linguistic or semantic signal relevant to our experiments. Following the parcellation of
+participant brain images into 1000 regions of interest (ROIs), we sought to refine our analysis to
+focus on information most relevant to the semantic representation task. Firstly, we constructed a
+ground-truth semantic similarity matrix using cosine similarity between sentence embeddings
+derived from the text-embedding-ada-002 model. We then constructed an n x n representational
+6https://github.com/tsumers/bert-brains
+142
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+dissimilarity matrix (for n sentences) by taking the difference in average activity for all pairs of
+sentences. We then correlated each ROI’s representational dissimilarity matrix (RDM) with this
+ground truth, allowing us to rank the parcels based on their task relevance for each participant.
+Finally, we aimed to identify the most informative subset of ROIs for semantic representation.
+Here, we iteratively considered p top-ranked parcels (from 1 to 1000) and constructed a new
+RDM by using activation values from 1 to p parcels for each sentence. These combined parcel
+RDMs were then correlated with the ground truth to determine the optimal number of parcels
+to include in the final representation. This procedure was repeated for all participants. The
+results, presented in Figure 7.1, show a consistent pattern across participants, with the optimal
+number of parcels for semantic representation converging around p=36. We also present the
+participant-wise correlations between the composite parcellation RDMs and the ground-truth
+semantic similarity RDM for values of p in {1,2,...,10} in Table 7.1. Here we see that the
+amount of top parcels selected by our procedure to construct the final parcellation RDM (p = 36)
+achieves a better correlation with the ground truth signal than simply selecting information from
+only the first 10 values of p for all participants other than participant 84. For consistency in
+model training and interpretation across participants, we opted to use the same number of brain
+regions for all participants, even though a slightly higher correlation might have been achievable
+for participant 84 using a different selection strategy. This approach ensures that all models are
+enriched with a comparable amount of brain-derived information, easing interpretation when
+comparing RSR when using representational target patterns from different participants.
+7.3.5 Regularisation Batch Size
+When employing representational similarity regularisation to train models for tasks involving
+semantic representation, we must select an appropriate batch size. This choice presents a tradeoff. Larger batch sizes offer the benefit of capturing richer comparisons between various levels
+of semantic similarity within the brain structure. However, this comes at the potential cost
+of comparing too many sentences at once, potentially diluting the semantic similarity signal
+and making it difficult to update gradients meaningfully during the training. Furthermore,
+computational resources can place an upper limit on our choice of batch size, as the memory
+required to process the similarity matrix for a batch scales proportionally with the square of the
+batch size (n
+2
+).
+We adopt a batch size of 5 for our experiments unless otherwise specified. This choice
+143
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+Figure 7.1: Correlation between composite parcel RDMs and the ground-truth sentence similarity
+RDMs, averaged across participants. The parcellation RDMs were constructed by ranking
+individual parcel RDMs for each participant and constructing a new RDM that captures the
+pair-wise dissimilarity using values in parcel 1 to n.
+Subject 16 84 106 111 132 133 134 135 137 138 139 140 141
+# top parcels
+1 0.2 0.24 0.1 0.07 0.12 0.09 0.06 0.07 0.07 0.06 0.09 0.06 0.07
+2 0.18 0.24 0.1 0.09 0.14 0.1 0.08 0.1 0.08 0.07 0.1 0.08 0.1
+3 0.17 0.23 0.12 0.11 0.14 0.11 0.09 0.12 0.09 0.1 0.12 0.09 0.1
+4 0.17 0.23 0.12 0.12 0.15 0.13 0.1 0.14 0.09 0.11 0.13 0.09 0.11
+5 0.17 0.23 0.12 0.13 0.15 0.13 0.11 0.15 0.08 0.11 0.13 0.1 0.11
+6 0.17 0.23 0.14 0.15 0.15 0.13 0.12 0.17 0.08 0.12 0.14 0.11 0.12
+7 0.17 0.22 0.14 0.15 0.15 0.14 0.13 0.17 0.1 0.14 0.14 0.11 0.13
+8 0.17 0.22 0.14 0.16 0.15 0.15 0.14 0.17 0.11 0.15 0.14 0.12 0.13
+9 0.17 0.21 0.15 0.16 0.17 0.14 0.14 0.18 0.11 0.15 0.15 0.12 0.13
+10 0.16 0.21 0.14 0.17 0.18 0.15 0.14 0.18 0.11 0.15 0.15 0.13 0.13
+36 0.21 0.17 0.17 0.19 0.2 0.16 0.17 0.21 0.14 0.19 0.18 0.18 0.16
+Table 7.1: Correlations between composite parcellation RDMs and the ground-truth semantic
+similarity RDM. The amount of top parcels empirically selected to construct the final parcellation
+RDM (n = 36) achieves a better correlation with the ground truth signal than simply selecting
+information from only the top n elements in {1,2,...,10} for all participants other than participant 84.
+144
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+was made to balance our previous considerations under the assumption that a batch size of 5
+will capture a reasonable amount of semantic variation while maintaining informative gradients
+for effective gradient descent optimisation and assuring computational feasibility. We design
+an experiment in order to test this assumption by contrasting our chosen value with a larger
+alternative.
+7.3.6 Correlation Function
+One requirement for RSR is the implementation of a differentiable correlation function. In
+RSA, the final similarity between two models is measured by the correlation between their
+representational dissimilarity matrices (RDMs). These RDMs capture the pairwise representational distances between stimuli encoded by the models. To meaningfully perform gradient
+descent and update the representations in a given model such that its RDM better correlates
+with a target pattern, all calculations must be differentiable. Commonly, correlation in RSA is
+measured using Kendall’s tau and Spearman’s rank correlation coefficient (Nili et al., 2014).
+However, the standard forms of these functions are not differentiable because ranking the data
+introduces discontinuities that prevent the calculation of a smooth derivative. To address this,
+we use the method proposed by Blondel et al. (2020) to calculate a differentiable variant of
+Spearman’s rank correlation coefficient. They propose an efficient “soft” ranking function, which
+can replace the standard ranking operation in Spearman’s r and allow gradients to flow through
+the operation, enabling training via gradient descent. This soft rank function, rεΨ(θ), is defined
+by the following equation:
+rεΨ(θ) := PεΨ(−θ,ρ) = PΨ
+
+−θ
+ε
+,ρ
+
+(3)
+Where θ ∈ R
+n
+is a vector of logits to be optimised by the model, and ρ := (n,n−1,...,1) is
+the reversing permutation vector (i.e. a vector representing ranks in descending order, for example,
+for n = 3, ρ = (3,2,1)). PΨ(z,w) is a projection that applies a strong convex regularisation, Ψ.
+The parameter ε > 0 is the regularisation strength which controls the smoothness of the rank
+approximation. This differentiable soft rank is then integrated into a squared loss function for
+optimisation. The objective is to minimise the difference between the true ground truth ranks (r)
+and the model’s predicted soft ranks (rεΨ(θ)):
+L (r,θ) = 1
+2
+∥r −rεΨ(θ)∥
+2
+(4)
+145
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+We use the version of Blondel et al.’s soft-rank implementation provided in the torchsort
+library, which is a PyTorch adaptation of their original code7
+. While the differentiable Spearman
+correlation function has been used in training computer vision models (S. Wang & Zheng,
+2023) and malware classification models (Rudd et al., 2024), our approach is the first to our
+knowledge to leverage differentiable correlation functions to induce representational similarity
+with a second-order target pattern.
+7.3.7 Regularisation Strength
+Another consideration when setting up representational similarity regularisation is the value
+of the regularisation strength (previously denoted by λ). This parameter controls the relative
+weight apportioned to the representational regularisation term (RRS) compared to the main loss
+associated with a given task (LT ). A higher λ value increases the influence of the regularisation
+term, urging the model’s internal representations to better align with the provided similarity
+structure. Conversely, a lower λ value places greater emphasis on optimising the task loss,
+potentially sacrificing some representational similarity for directly improving task performance.
+We expect that the optimal regularisation strength value will vary depending on various factors,
+including the similarity between the main task and the information captured by the target
+similarity pattern, batch size, type of model, etc. Unless otherwise stated, our experiments use a
+regularisation strength of λ = 0.1. This value is intended to allow the regularisation procedure to
+influence the loss function while still maintaining the primary task loss as the strongest influence
+on gradient updates.
+7.4 Experiments and Results
+We design a variety of experiments to comprehensively explore factors relating to our regularisation procedure and its influence on target task performance. These experiments manipulate
+both aspects of the model architecture/training optimiser (e.g. choice of initial pre-trained BERT
+model, learning rate, batch size) and components that are particular to our regularisation procedure (e.g. choice of target regularisation pattern). By systematically evaluating these conditions,
+we aim to understand how they affect the model’s ability to learn the primary task while also
+aligning its internal representations with human brain activity.
+7The torchsort library can be found at https://github.com/teddykoker/torchsort, which adapts the original code
+from https://github.com/google-research/fast-soft-sort
+146
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+7.4.1 Experiment 1: Regularisation
+Overview
+Our primary experiment examines the effect that RSR has on the semantic textual similarity test
+correlation across training for 13 participants. For each individual participant, we independently
+trained the BERT model to minimise the mean-squared error for the predicted STS score for
+a sentence pair while maximising the correspondence between model-elicited final sentence
+representations and participant brain-based similarity. We used λ = 0.1 to weigh the terms in
+the loss function. We use a batch size of 5, a sentence embedding vector size of 128, and a
+learning rate of 0.0001. To optimise model parameters efficiently, we used the Adam optimiser
+throughout the experiments (Kingma & Ba, 2017). For each participant we used activations in
+the top 36 best parcels (identified with the parcellation filtering analysis described above) as
+the target regularisation pattern. To establish a baseline for comparison, we also trained the
+model 13 times without RSR (i.e. without any subject-specific regularisation data), averaging the
+test correlation per epoch across these runs. Subsequently, we will perform 14 paired t-tests
+(one per each of the 13 participants, and one for the average score across participants) to assess
+whether RSR significantly impacts test performance across epochs compared to the baseline (no
+RSR) runs. We hypothesise that some participants’ brain data will be more suitable for the RSR
+procedure than others, as there will inevitably be variability introduced by factors such as brain
+signal quality.
+Results
+The performance of models examined in Experiment 1 is presented in Figure 7.2 and the results of
+Experiment 1 is presented in Table 7.2. P-values were corrected using the Bonferroni correction
+by scaling the p-value by the number of tests carried out.
+Overall we found that the average test correlation achieved when not using RSR was just
+over 0.1. We find that RSR improves on this performance when using two of the participants’
+brain data as representational alignment targets (participants 16 and 84). The gain in correlation
+for these two participants was highly significant (p<0.01 and p<0.001, respectively, Bonferronicorrected for number of participants). The overall highest test performances were seen at
+epoch 3 using RSR with participant 16’s data (correlation=0.4) and epoch 8 using data from
+participant 84 (correlation=0.39). We also find that the RSR intervention significantly negatively
+impacts performance when using brain data from participants 111 and 137 as target patterns. As
+147
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+        	 
+ 
+
+
+
+
+
+
+
+
+  
+ 
+ 
+ ! 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+	
+
+
+
+Figure 7.2: Experiment One. Effect of RSR. Test correlation during training under two
+conditions: (a) With Representational Similarity Regularisation (using a given participant as a
+representational target pattern) (b) Without RSR
+148
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+Participant Mean Test Correlation t-statistic p-value Corrected p-value
+16 0.24 5.5 0.000 0.005**
+84 0.30 11.0 0.000 0.0***
+106 0.08 -1.2 0.274 3.836
+139 0.05 -3.4 0.008 0.118
+140 0.06 -1.5 0.166 2.325
+141 0.03 -2.8 0.021 0.295
+111 0.02 -4.4 0.002 0.026*
+132 0.11 0.0 0.983 13.768
+133 0.03 -3.9 0.004 0.053
+134 0.05 -3.5 0.007 0.092
+135 0.09 -0.9 0.400 5.601
+137 -0.01 -3.9 0.003 0.047*
+138 0.03 -3.4 0.008 0.106
+Average 0.08 -1.4 0.193 2.704
+Table 7.2: Results of paired t-tests carried out for Experiment One. We carry out 14 paired t-tests
+comparing the test correlation for each training epoch when using RSR with a given participant’s
+brain data to the average test correlation without RSR. This procedure is carried out for 13
+participants and the average performance per epoch across all participants. Final p-values are
+reported after Bonferroni correction. * p<0.05, ** p<0.01, *** p<0.001
+hypothesised, we have found major disparities in the performance of RSR across the participants
+in our experimental cohort. These results show that representational similarity regularisation can
+potentially be used to enrich the representations of neural language models with fMRI-elicited
+brain activity in order to improve performance on a semantic task, though evidence for this is only
+found in two participants. Therefore, it is crucial to carefully select and experimentally validate
+the choice of representational target pattern when employing this regularisation technique.
+7.4.2 Experiment 2: Impact of Regularisation Strength
+Overview
+In our second experiment we examine the effect of the regularisation strength parameter λ on the
+semantic textual similarity test correlation across training for the 13 participants. Again, we train
+the BERT model to minimise the mean-squared error for the predicted STS score for sentence
+pairs while simultaneously maximising the alignment between model-elicited final sentence
+representations and participant brain-based similarity. In our two experimental conditions we use
+two different regularisation strengths: (a) λ = 0.1, and (b) λ = 0.9. This corresponds to setting
+the regularisation loss’ contribution to the overall loss function to 10% and 90%, respectively.
+All hyperparameters except the regularisation strength are kept the same as in Experiment 1
+149
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+Participant Mean Test Correlation
+(λ=0.1)
+Mean Test Correlation
+(λ=0.9) t-statistic Corrected p-value
+16 0.24 0.26 -0.6 7.979
+84 0.30 0.27 1.4 2.865
+106 0.08 0.12 -1.7 1.762
+139 0.05 0.17 -6.0 0.003**
+140 0.06 0.09 -2.2 0.806
+141 0.03 0.12 -6.9 0.001**
+111 0.02 0.10 -5.7 0.004**
+132 0.11 0.12 -0.7 7.162
+133 0.03 0.08 -1.8 1.424
+134 0.05 0.07 -1.3 3.06
+135 0.09 0.13 -2.7 0.34
+137 -0.01 0.08 -5.7 0.004**
+138 0.03 0.08 -2.4 0.595
+Average 0.08 0.13 -10.1 0.0***
+Table 7.3: Results of paired t-tests carried out for Experiment Two. We carry out 14 paired t-tests
+comparing the test correlation for each training epoch between two regularisation conditions,
+(a) with λ = 0.1, and (b) with λ = 0.9. This procedure is carried out for 13 participants and
+the average performance per epoch across all participants. Final p-values are reported after
+Bonferroni correction. * p<0.05, ** p<0.01, *** p<0.001
+(Section 7.4.1).
+After training our models for each participant under the two conditions, we conduct 14 paired
+t-tests (one per each of the 13 participants, and one for the average scores across participants) to
+assess whether there is a significant difference in the performance of our models using RSR
+under the two regularisation strengths. We hypothesise that an excessively high λ value may
+hinder test performance, as the training optimiser could prioritise the representational alignment
+task at the expense of the primary STS prediction task.
+Results
+The performance of models under the two regularisation strengths examined in Experiment 2 is
+presented in Figure 7.3 and the results of Experiment 2 is presented in Table 7.2. P-values were
+corrected using the Bonferroni correction by scaling the p-value by the amount of tests carried
+out.
+Overall, we find that a higher regularisation strength tends to improve test performance.
+The average test correlation increased for all representational target patterns except that elicited
+from participant 84. This increase was significant after correction for 4 participants and for the
+150
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+        	 
+ 
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+ 
+	
+
+
+
+
+
+
+Figure 7.3: Experiment Two. Effect of Regularisation Strength. Test correlation during training
+under two conditions: (a) with λ = 0.1 (b) with λ = 0.9.
+average performance per epoch across all participants. While a higher regularisation strength
+slightly decreased performance for participant 84 (from an average correlation of 0.3 to 0.27),
+this difference was not found to be significant. These results run counter to our prior hypothesis
+that test performance may be hindered by higher values of λ, demonstrating that many of
+the models were able to achieve higher correlations on the primary STS task when we more
+aggressively optimised for more brain-like representations of semantic similarity. Consequently,
+it may be argued in retrospect that choosing 0.1 as the default regularisation strength across
+our experiments was a poor choice, as the RSR intervention works better on average when this
+value is 0.9. In any case, the selection of λ is much less relevant than our choice of target
+representational pattern, as the best performing models were trained on data from participants 16
+and 84, regardless of regularisation strength.
+7.4.3 Experiment 3: Regularisation Source Hidden Size
+Overview
+In Experiment 3, we examine the effect that the hidden size of our model’s sentence embedding
+vectors on the test correlation. As described in Section 7.3.1, our final prediction of sentence
+151
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+        	 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+ 
+	
+
+
+
+
+
+
+Figure 7.4: Experiment Three. Effect of Hidden Vector Size. Test correlation during training
+with three hidden state sizes for the model’s sentence representation: (a) h = 64, (b) h = 128
+and (c) h = 256.
+similarity for a pair of sentences in the cosine similarity between the sentence representations
+after they are projected into a lower dimensional space. In our architecture we take this sentence
+embedding vector as the regularisation target, i.e. the vector upon which we will enforce the
+brain similarity constraint. In this experiment we wish to test our prior assumption that it is
+easier to enforce complex similarity constraints in higher-dimensional spaces while maintaining
+performance on the primary task. To this end, we consider three experimental conditions
+corresponding to varying regularisation target hidden sizes: (a) h = 64, (b) h = 128, and (c)
+h = 256. In all other experiments we use a hidden size h of 128. Again, all hyperparameters
+with the exception of the regularisation target hidden size are kept the same as in Experiment 1
+(Section 7.4.1).
+Results
+The test correlation scores of models trained with the three different hidden vector sizes are
+presented in Figure 7.4. Overall we can see we that using the larger hidden size, h = 256,
+generally leads to higher test correlations than the other two hidden sizes, and that the model
+152
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+trained with h = 128 generally performs worse than h = 64 across most participants. As in
+previous experiments, we find that participants 16 and 84 generally achieve much higher test
+correlations than when we use data from any other participant. Furthermore, the results from
+models regularised with data from these two participants deviate from the overall trends across
+hidden vector sizes. This finding again underlines the importance for choosing and empirically
+validating one’s choice of regularisation representation target pattern when employing RSR. We
+note that the highest test correlations for participants 16 and 84 occur when the regularisation
+target pattern has a hidden size of 128. While an argument could be made that the larger hidden
+size is better for the RSR procedure, we find that focusing on results for representational target
+patterns that have been shown to significantly improve performance indicates no clear preference
+between a hidden size of 128 and 256.
+One potential explanation for the fact that a hidden size of 256 is best when using data from
+participants that generally do not yield good similarity representations for the RSR procedure
+is that a greater number of hidden nodes allows the optimiser to maximise similarity within a
+subset of these nodes. In this case much of the semantic representation encoded by the final layer
+of the BERT model would be able to filter through to the final similarity prediction (in essence
+acting a noisy dimensionality reduction). It would follow that using a smaller hidden size would
+interfere with the ability to retain the dimensionally reduced semantic encoding. This could
+potentially lead to catastrophic forgetting, as the model’s representation of important aspects of
+semantic information is overwritten in order to prioritise the particular brain similarities elicited
+by the participant’s data. In any case, future work could explore this phenomenon by training
+across a large range of hidden sizes and carrying out linear decoding to measure the decodability
+of the original sentence embedding and the brain similarity.
+7.4.4 Experiment 4: Batch Size
+Overview
+Experiment 4 explores how regularisation batch size affects test correlation. As we describe
+in Section 7.3.5, the choice of batch size represents a trade-off between capturing more
+fine-grained comparisons between a greater diversity of brain structures with higher batch
+sizes at the risk of introducing excessive noise that can obscure the signal needed for effective
+gradient updates. In this experiment we employ two different batch sizes, 5 (corresponding to
+10 pairwise sentence similarities computed per batch) and 10 (corresponding to 45 pairwise
+153
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+        	 
+ 
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+ 
+	
+
+
+
+
+
+
+Figure 7.5: Experiment Four. Effect of Batch Size. Test correlation during training under two
+conditions: (a) with b = 5 (b) with b = 10.
+sentence similarities computed per batch). Our prior assumption for this task is that a lower
+batch size will capture a reasonable amount of semantic variation across participants (and
+that a batch size of 10 may result in too many comparisons to yield useful gradients), leading
+to the hypothesis that higher test correlations will be observed for the batch size of 5. As in
+other experiments, all other hyperparameters are kept the same as in Experiment 1 (Section 7.4.1).
+Results
+Figure 7.5 presents the results for Experiment 4. As observed in previous experimental configurations, regularising with brain data from most participants (excluding participants 16 and 84)
+resulted in a trend of higher test correlations with the larger batch size (b=10) across training
+epochs. This suggests that for most participants, the increased number of comparisons in the
+larger batch captured more task-relevant information, leading to better model performance.
+Furthermore, we again find that for models regularised on this set of participants’ data the
+highest test correlations were measured at epoch 0, i.e. with the least amount of fine-tuning. In
+contrast, we see that the highest test correlations for the models regularised using brain data
+from participants 84 and 16 (occurring at epochs 8 and 3, respectively) are achieved using the
+154
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+lower batch size of 5. The fact that the highest overall test correlations were seen using the lower
+batch size aligns with our prior assumption that regularising with the batch size of 5 provides
+enough similarity information to provide meaningful gradients when the RSR procedure has an
+appropriate representational target pattern i.e. data from participants 16 and 84.
+7.4.5 Experiment 5: Learning Rate Magnitude
+Overview
+In this experiment, we investigate the impact of the initial learning rate on model performance
+during representational similarity regularisation. Although the Adam optimiser we use adjusts
+the learning rate during training, the initial value will significantly influence the trajectory of
+the optimisation process. Our hypothesis is that this particular implementation of RSR will
+benefit more from a lower initial learning rate than a higher rate. A lower learning rate allows for
+more gradual updates to the model parameters, potentially enabling better integration of the
+fine-grained semantic similarity information provided by the brain data. We compare our default
+initial learning rate of 0.0001 to a higher rate of 0.01 to evaluate this hypothesis.
+Results
+Figure 7.6 shows the test correlation during training with RSR given different participants’ brain
+similarity patterns under two different learning rates, 0.0001 and 0.01. As expected, the initial
+learning rate magnitude has a strong influence on performance. For most participants we find
+that the higher learning rate (0.01) leads to lower correlations with the held out test similarity
+scores, with most correlations lying between -0.1 and 0.1.
+In contrast, the lower learning rate of 0.0001 generally leads to higher test correlations,
+particularly for participants 16 and 84. Models regularised using these participants again achieve
+substantially better results compared to using other target patterns (which generally show a
+decline in performance after the first epoch). This finding reinforces the importance of selecting
+both a high-quality target pattern and appropriate parameterisation for successfully implementing
+representational similarity regularisation.
+7.4.6 Experiment 6: Parcellation Strategy
+Overview
+In Section 7.3.4 we describe our methodology for ranking each subject’s brain parcels according
+155
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+        	 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+	
+
+
+
+
+
+
+Figure 7.6: Experiment Five. Effect of Learning Rate. Test correlation during training under
+two conditions: (a) with α = 0.01 (b) with α = 0.0001.
+to how relevant they are for the task of measuring semantic similarity which led us to selecting 36
+as the number of parcels to consider when generating our similarity matrices. In Table 7.1 we can
+see the disparity in correlation between the composite parcellation RDMs and the ground-truth
+semantic similarity RDM across different participants, with participants 16 and 84 having a
+relatively high correlation with just one top parcel before gradually becoming less correlated
+with increasing numbers of parcels (although this decrease in correlation is recovered by 36
+parcels for participant 16). Despite the fact that the composite parcellation RDMs generated from
+most participants’ brain data using 36 top parcels correlates better with the ground truth signal
+than that of participant 84, we find that regularising our models with data from participant 84
+consistently leads to better test correlations than these other models. This emerging trend leads
+us to question how our parcellation strategy is related to test correlation. We are particularly
+interested in whether our models may benefit from being enriched with similarity information
+from additional parcels, and to what extent model performance will degrade if different subsets
+of parcels are used for generating brain RSMs.
+As such, we have designed Experiment 6 to investigate test correlation in RSR under three
+different parcellation strategies, (a) using the top 36 correlated parcels per participant (the
+156
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+0 1 2 3 4 5 6 7 8 9
+Epoch
+0.1
+0.0
+0.1
+0.2
+0.3
+0.4
+Test Correlation
+Parcellation Strategy
+Top 36
+Random 36
+All 1000
+Participant
+16
+84
+106
+111
+132
+133
+134
+135
+137
+138
+139
+140
+141
+Figure 7.7: Experiment Six. Effect of Parcellation Strategy. Test correlation during training
+under three different parcellations: (a) using the top-36 correlated parcels, (b) using a random 36
+parcels, and (b) using all 1000 parcels.
+157
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+default strategy used across other experiments), (b) using 36 random parcels, and (c) using all
+1000 available parcels. We expect test correlation to remain highest under condition (a), and that
+a random parcellation strategy will lead to substantially worse correlations on the held out test
+set. We also expect that using all 1000 parcels will result in worse results as noise is introduced
+from parts of the brain that are functionally unrelated to linguistic or semantic processing.
+Results
+The results for Experiment 6 are presented in Figure 7.7. For readability, we have grouped
+together test correlations for all participants except for participants 16 and 84, which are plotted
+separately on the figure.These results follow the same trend as in previous experiments, with
+participants 16 and 84 standing out as having much higher test correlations across several
+conditions compared to all other participants. We can see that even the models regularised using
+a random 36 parcels from these two participants can outperform the average test correlation
+for all other participants when the top 36 parcels are selected. For models regularised on brain
+similarity data from participants 16 and 84 there is a clear preference for using only the top
+36 parcels, followed by the strategy of creating RSMs using all 1000 parcels, with the models
+trained using information from 36 random parcels having substantially lower test correlations.
+This indicates that when we use RSR with an fMRI-based target pattern we should select a small
+subset of parcels that are particularly enriched with task-relevant information, rather than using
+similarity information from all parcels. This is due to the latter strategy introducing noise from
+brain regions that are not relevant to semantic processing. Unexpectedly, we did not find a clear
+preference in parcellation strategy for participants other than 16 and 84, with performance being
+poor across the three conditions and generally getting worse with further training epochs. This
+suggests that for participants whose brain data is not inherently well-suited to RSR, the specific
+parcellation strategy will not have a significant impact on performance.
+7.4.7 Experiment 7: Fine-tuning STS-BERT
+Overview
+We designed Experiment 7 to investigate the effect of using a version of BERT that was
+fine-tuned for semantic similarity tasks. We predict that fine-tuning a model that has been
+pre-trained on a semantic textual similarity task, such as STS-BERT, will provide a better
+starting point for further fine-tuning on sentence pairs from the Narratives story compared
+158
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+       	 
+ 
+ 
+
+
+
+
+
+ 
+ !!
+
+
+
+
+
+!!
+	
+
+ 
+	
+
+
+
+ 
+
+
+
+
+
+
+ 
+ 
+Figure 7.8: Experiment Seven. Effect of fine-tuning on a version of BERT specialised in STS.
+The two training conditions are: (a) trained on BERT, and (b) trained on STS-BERT.
+to the baseline BERT model. By building on pre-existing knowledge of semantic similarity,
+we expect the fine-tuned STS-BERT model to perform better under our proposed RSR framework.
+Results
+Figure 7.8 presents the results for Experiment 7. Consistent with previous experiments, participants 16 and 84 do not follow the trend exhibited by other participants. Models regularised
+using similarity patterns elicited from the other participants clearly favour the pre-trained STS
+model. Experiment 7 is the first instance where models regularised using data from participants
+other than 16 and 84 achieve competitive results with models regularised using data from these
+two participants (in particular, participants 134 and 140 demonstrate strong performance in the
+final epochs). This outcome suggests that RSR can function effectively even with relatively poor
+representational targets, provided that the initial model is well suited to the particular target task.
+While we found some broad evidence for our initial hypothesis that a model pre-trained
+on task-relevant information would perform better under the RSR framework compared to
+using the baseline model, the results for participants 16 and 84 deviate from this trend. This
+discrepancy could potentially be partly explained by a form of catastrophic forgetting. The
+159
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+
+ 
+
+ 
+
+ 
+
+ 
+        	 
+ 
+  
+
+
+
+ 
+
+ 
+
+ 
+
+
+Figure 7.9: Experiment Eight. Bar plot showing highest correlation across epochs for each
+participant under two conditions: (a) without RSR (mean performance across 13 runs, and (b)
+with RSR.
+process of imposing the similarity structure elicited from participant brain information could
+potentially inadvertently undo the model’s embedding of task-relevant information that was
+conferred by the fine-tuning process. Furthermore, it may be the case that the two positive signals
+(the task-relevant regularisation structure extracted from participants 16/84, and the pre-trained
+STS knowledge) could be competing for influence, hindering the model’s ability to leverage both
+effectively. Conversely, for participants with potentially noisier or less task-relevant similarity
+structures, the pre-trained model might have more freedom to extract the fine-tuned information
+directly.
+7.4.8 Experiment 8: Relationship between Similarity Prediction Performance and STS-B
+performance under RSR
+Overview
+Across our experiments we have measured performance as the correlation between the model’s
+prediction of semantic similarity between pairs of sentences within a held-out test-set (i.e. the
+final third of the “Slumlord” story). As all sentence pairs originate from the same story, we
+may predict that our models will overfit to the particular semantic space that is covered by this
+160
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+story. Furthermore, the fact that we extract 20 TRs of context prior to a particular fMRI image
+means that each of our sentence pairs are actually 30 second snippets of text, amounting to short
+paragraphs rather than distinct sentences, further separating our task from a typical STS task.
+These two factors lead us to the hypothesis that our models will not perform well on a typical
+STS task, as it would be difficult for models trained on such long and thematically similar text
+snippets to generalise to a generic STS task. As such, across all experimental trials we have also
+evaluated our models on the STS-Benchmark task. To keep inference consistent with how our
+models have been trained to predict similarity for batches of sentences, we constructed batches
+of STS-B sentence pairs from the validation set of the GLUE benchmark. At the end of each
+epoch of training, we predict the similarity across each of these batches, concatenate predictions
+and evaluate performance using Pearson’s r.
+As part of this experiment we are interested in investigating whether representational
+similarity regularisation helps prevent models from overfitting, as these models must both predict
+semantic similarity for pairs of text snippets while also enforcing structural constraints on its internal representations such that they align with human brain similarity information. We expect that
+this constraint will make our models more robust and thus perform better on the STS-Benchmark.
+Results
+In Figure 7.9, we present the results for Experiment 8. The figure shows STS correlation for two
+conditions: (a) the mean-pooled correlations across 13 runs without RSR, and (b) the maximum
+correlation achieved across epochs for each model.
+Across the models we evaluated, we observe maximum correlations on the STS-B task in the
+range of 0.1 to 0.2. These scores are considerably lower than both the highest scores achieved
+on our primary semantic similarity task (around 0.35 to 0.4) and those typically reported for
+models trained specifically on the STS-B dataset. This is unsurprising, as our models were
+trained on a different kind of semantic similarity task involving longer and thematically similar
+text snippets, and thus would not be expected to generalise well to a standard STS-B benchmark.
+Of the 13 models, 12 showed a decrease in STS-B performance when we applied the
+regularisation constraint. The only model that improved correlation after applying RSR was
+the model regularised on participant 84’s data, which was one of two models that consistently
+outperform all other models. This may indicate that RSR can improve generalisation to related
+tasks given the right representational target. While this result (i.e. that the strongest model would
+161
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+also perform relatively well on an STS task) was not surprising, it was somewhat unexpected
+that the model regularised on participant 16’s target pattern did not yield similar results on
+the ancillary STS task. That model’s performance, a correlation of 0.15, was on par with
+several other models, including the model regularised using participant 111’s target pattern which
+performed slightly better. One potential clue for the reason behind this disparity could be offered
+by Table 7.3.4, where we saw that the top parcels in participant 84’s data revealed particularly
+high correlation with the ground-truth semantic similarity, reaching much higher correlations
+than participant 16. Based on those results we argue that participant 84’s brain similarity patterns
+reveal a particularly strong alignment with the semantic similarity task, and that this alignment
+leads to representations of semantic similarity that generalise to a typical STS task.
+All in all, these results support our first prediction that our models would show limited
+generalisability to a typical STS task. Our findings regarding the effectiveness of RSR in
+promoting generalisability are mixed. For one of the models that benefitted from RSR in our
+primary task (participant 84), we see a substantial increase in STS-B correlation, suggesting
+that RSR helped reduce overfitting to the primary task for this model. However, for models that
+did not benefit from RSR in the primary task, the regularisation procedure tended to either not
+improve performance or activity harm performance on the STS-B task.
+7.4.9 Principal Findings
+Across our experiments, we have evaluated our novel approach of using representational similarity
+regularisation to inject human-derived semantic information into the representational structure
+of transformer models. We note several key trends:
+(1) RSR can improve fine-tuning transformer models for the task of predicting semantic
+similarity for long sentence pairs. This demonstrates that our reframing of the RSA framework
+as a regularisation technique has successfully allowed us to gone beyond interpretation and can
+be used improve deep neural networks with data from cognitive science. While this was primarily
+observed for a subset of models in Experiment 1, it suggests the potential for further exploration
+to broaden the applicability of RSR across different transformer architectures and tasks.
+(2) It is important to select an appropriate representational target. We found that using
+data from two participants (participants 16 and 84) worked very well for improving average
+performance on our task. Furthermore, this finding is quite robust across many experiments,
+where we consistently found these two models to perform best under different parameterisations.
+162
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+This again highlights how crucial it is to choose an appropriate representational target when
+employing RSR. Particular to fMRI data, part of this process of selecting the target pattern will
+involve a careful analysis of information within the particular parcellation chosen, resulting in
+selecting the correct amount of information used to maximise semantic signal and reduce noise.
+Further work is required to better understand the data quality and representational richness of the
+fMRI data across participants, and how this may interact with the utility of the regularisation
+signal used in RSR.
+(3) RSR can improve generalisation to related tasks when an appropriate representational target is selected. This result was found in Experiment 8, where a target pattern elicited
+by participant 84’s brain data was used to regularise a model that improved performance on an
+STS benchmark. However, we note that this pattern does not hold across participants in general.
+7.5 Limitations and Future Work
+The current work introduces a method for aligning representational patterns in the hidden vectors
+of a neural network given a set of stimuli with a target representational pattern constructed from
+the same stimuli in a separate modality. One limitation of the current work is that the setting
+of our experimental design is complex, potentially inhibiting our ability to evaluate the effect
+of the regularisation intervention due to factors introduced by the tasks and data that we use.
+In particular, we recognise the relative complexity of (1) the neural networks that we subject
+to this regularisation process (i.e. large Transformer models), (2) the task that we use for the
+primary loss calculation (semantic textual similarity of large sequences of text), and (3) the target
+pattern used to regularise our Transformer models (fMRI data elicited in a natural language
+comprehension task). For the current work, we chose this particular class of models as we
+are interested in developing methods for analysing and improving the linguistic capabilities of
+large language models, and Transformer models represent the state of the art across a variety
+of natural language processing tasks. We chose to train these models on a semantic textual
+similarity task as we have used STS in previous chapters as a robust measure of the broad
+semantic representational ability of these models, and furthermore this task has broad use-cases
+in language technology. We chose to regularise the models’ representations using fMRI data
+as we are interested in assessing whether improving the alignment between cognitive data and
+a models’ representations (e.g. similarity to semantic representations generated by the human
+brain) leads to improved performance on a real world NLP task.
+163
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+Despite the relative complexity of these experimental features, we are still able to find
+evidence that our approach to regularising Transformer models using representational similarity
+alignment improves model performance on a related downstream STS task (when we regularise
+using a particular representational target pattern, subject 84). In any case, future work will
+address concerns regarding the complexity of our experimental set-up by (1) simplifying the
+neural network model that we use (e.g. using a feedforward neural network with one hidden
+layer), (2) by using a simpler primary loss task (e.g. a regression task with a low-dimensional
+numeric input, such as house-price estimation from sq-footage and number of rooms), and
+(3) a simpler target representational target pattern (such as a sparse matrix with dimensions
+corresponding to whether or not a particular house has a particular feature). By making these
+changes future studies can more effectively isolate the specific contributions of our proposed
+regularisation schema, leading to more interpretable and generalisable experimental results.
+Another limitation of the current work is the restricted scope of stimuli used. By focusing
+solely on the Slumlord story from the Narratives fMRI dataset we may have limited the range
+of semantic representations captured, potentially impacting the generalisability of our findings.
+While the Slumlord story does offer a degree of internal semantic variance, we anticipate that a
+broader range of semantic stimuli would allow us to both identify more effective regularisation
+targets and improve the representational similarity matrices for participants examined in the
+current work. In particular, we expect that models that have been regularised using a broader
+range of semantic stimuli would generalise better to a generic downstream STS task. Additionally,
+the noise inherent in fMRI data, which can be mitigated by using a larger dataset with multiple
+stories and additional participants, may have limited the effectiveness of our regularisation
+procedure. By expanding the scope of our analysis we could potentially identify higher-quality
+representational target patterns that are more robust to noise (such as participants 16 and 84
+from the current work). Due to practical constraints, we were unfortunately unable to include
+more stories in the current study. Future research should particularly aim to include the “Reach
+for the Stars One Small Step at a Time” story, recorded from the same participants during the
+same session, to enhance the diversity of semantic representations. By expanding the fMRI
+data associated with each participant in this manner we can significantly improve the semantic
+representational target pattern by including additional pairwise comparisons, not only between
+sentences within the new story but also between sentences from the “Slumlord” story and the
+new story.
+164
+7 ANALYSING AND IMPROVING TRANSFORMER MODEL REPRESENTATIONS
+WITH BRAIN DATA
+7.6 Conclusion
+This chapter introduced a novel methodology, Representational Similarity Regularisation (RSR),
+directly addressing the thesis’s final research question of whether actively encouraging the
+alignment of Transformer model representations with cognitive data lead to improved model
+effectiveness. Inspired by RSA, RSR allows us to actively align Transformer model representations with a given target signal. In this chapter we chose the rather ambitious goal of aligning
+Transformer models with human-derived signals, specifically fMRI brain data elicited by natural
+language. Across a variety of experiments we sought to determine if such alignment could
+enhance model performance on a long-form STS task, moving beyond the purely interpretative
+applications of cognitive science methods explored in earlier chapters.
+Our investigation demonstrated that RSR can indeed improve the fine-tuning of Transformer
+models for predicting semantic similarity in long sentence pairs, and can enhance generalisation capabilities to related tasks when an appropriate representational target is selected. We
+consistently found that data from specific participants (16 and 84) yielded the most effective
+regularisation, indicating the importance of selecting the appropriate cognitive target signals.
+These results provide a tentative affirmative answer to the thesis’ final research question, showing
+the potential of using cognitive signals to build more human-aligned deep neural networks for
+natural language processing. However, we note that further work is needed to validate the RSR
+methodology, for example in toy experimental setups with simpler, noise-free regularisation
+signal.
+165
