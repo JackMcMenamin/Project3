@@ -1,0 +1,4 @@
+RSR Training Run: Mode=rsr_all, Steps=400, RSR Layer=5
+============================================================
+Step 0    | MLM Loss: N/A | All pairs: 0.570 | All pairs (Pearson): 0.588 | Both in RSR: 0.458 | Both in RSR (Pearson): 0.497 | One in RSR: 0.675 | One in RSR (Pearson): 0.691 | Neither in RSR: 0.587 | Neither in RSR (Pearson): 0.588 | 
+Step 400  | MLM Loss: 1.7166 | All pairs: 0.580 | All pairs (Pearson): 0.596 | Both in RSR: 0.479 | Both in RSR (Pearson): 0.521 | One in RSR: 0.665 | One in RSR (Pearson): 0.682 | Neither in RSR: 0.599 | Neither in RSR (Pearson): 0.594 | 

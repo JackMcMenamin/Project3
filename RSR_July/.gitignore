@@ -1,0 +1,12 @@
+# datasets, fMRI archives, wiki dumps - all far too big to version
+data/
+
+# raw training stdout, regenerated on every run
+logs/
+
+# working files
+__pycache__/
+*.pyc
+*.pt
+*.tgz
+*.part
