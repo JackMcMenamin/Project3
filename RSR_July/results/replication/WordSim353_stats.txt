@@ -1,0 +1,7 @@
+--- WordSim353 Statistics ---
+(a) Original pairs: 353
+(b) Original unique words: 437
+(c) Inflection-expanded pairs: 700
+(d) Inflection-expanded unique words: 834
+(e) Frequency-filtered pairs: 601
+(f) Frequency-filtered unique words: 724

@@ -1,0 +1,7 @@
+--- THINGS Statistics ---
+(a) Original pairs: 10000
+(b) Original unique words: 1796
+(c) Inflection-expanded pairs: 19961
+(d) Inflection-expanded unique words: 3472
+(e) Frequency-filtered pairs: 10749
+(f) Frequency-filtered unique words: 2521

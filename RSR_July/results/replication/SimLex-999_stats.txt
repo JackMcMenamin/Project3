@@ -1,0 +1,7 @@
+--- SimLex-999 Statistics ---
+(a) Original pairs: 999
+(b) Original unique words: 1028
+(c) Inflection-expanded pairs: 999
+(d) Inflection-expanded unique words: 1028
+(e) Frequency-filtered pairs: 983
+(f) Frequency-filtered unique words: 1013

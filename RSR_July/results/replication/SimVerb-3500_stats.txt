@@ -1,0 +1,7 @@
+--- SimVerb-3500 Statistics ---
+(a) Original pairs: 3500
+(b) Original unique words: 827
+(c) Inflection-expanded pairs: 13995
+(d) Inflection-expanded unique words: 3291
+(e) Frequency-filtered pairs: 13213
+(f) Frequency-filtered unique words: 3125

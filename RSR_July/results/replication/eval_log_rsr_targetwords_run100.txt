@@ -1,0 +1,7 @@
+RSR Training Run: Mode=rsr_targetwords, Steps=2000, RSR Layer=5
+============================================================
+Step 0    | MLM Loss: N/A | All pairs: 0.570 | All pairs (Pearson): 0.588 | Both in RSR: 0.458 | Both in RSR (Pearson): 0.497 | One in RSR: 0.675 | One in RSR (Pearson): 0.691 | Neither in RSR: 0.587 | Neither in RSR (Pearson): 0.588 | 
+Step 200  | MLM Loss: 2.1930 | All pairs: 0.525 | All pairs (Pearson): 0.537 | Both in RSR: 0.389 | Both in RSR (Pearson): 0.425 | One in RSR: 0.598 | One in RSR (Pearson): 0.614 | Neither in RSR: 0.580 | Neither in RSR (Pearson): 0.563 | 
+Step 400  | MLM Loss: 2.2917 | All pairs: 0.501 | All pairs (Pearson): 0.512 | Both in RSR: 0.363 | Both in RSR (Pearson): 0.397 | One in RSR: 0.571 | One in RSR (Pearson): 0.585 | Neither in RSR: 0.574 | Neither in RSR (Pearson): 0.555 | 
+Step 600  | MLM Loss: 2.2559 | All pairs: 0.487 | All pairs (Pearson): 0.498 | Both in RSR: 0.352 | Both in RSR (Pearson): 0.386 | One in RSR: 0.558 | One in RSR (Pearson): 0.569 | Neither in RSR: 0.570 | Neither in RSR (Pearson): 0.551 | 
+Step 800  | MLM Loss: 2.2391 | All pairs: 0.485 | All pairs (Pearson): 0.494 | Both in RSR: 0.353 | Both in RSR (Pearson): 0.384 | One in RSR: 0.553 | One in RSR (Pearson): 0.564 | Neither in RSR: 0.573 | Neither in RSR (Pearson): 0.555 | 
