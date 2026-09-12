@@ -29,8 +29,8 @@ EVAL_EVERY=200
 LAYER=6
 SEED=1
 POOL=artifacts/sentences_strict
-SCRIPT=experiments/contextual_finetune/gpt2_rsr_continued_pretraining.py
-LOG=RSR_July/logs
+SCRIPT=experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py
+LOG=logs
 mkdir -p "$LOG"
 
 # ---- 1. lambda sweep (0.7 already exists as the main run) -----------------

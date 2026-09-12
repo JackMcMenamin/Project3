@@ -23,5 +23,5 @@ as a sibling module, so launch them from this directory (or with this folder on
 the path).
 
 ## Status note
-The headline results now come from continued pre-training in `../contextual_finetune/`.
+The headline results now come from continued pre-training in `../rsr_pretraining/`.
 This directory supplies the sentence pool (`harvest_sentences_strict.py`, then `filter_sentence_pool.py`); the cached-vector stages below are the earlier approach it grew out of and are kept for provenance.

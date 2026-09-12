@@ -15,7 +15,7 @@ the matched MLM control. Vanilla is the step-0 point of every curve, which is wh
 they all start together.
 
 Usage:
-    python experiments/contextual_finetune/plot_context_comparison.py
+    python experiments/rsr_pretraining/plot_context_comparison.py
 """
 from __future__ import annotations
 

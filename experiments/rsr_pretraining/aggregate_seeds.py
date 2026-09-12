@@ -5,7 +5,7 @@ each. Vanilla is the step-0 row; RSR and MLM are the best row by all_rho, which
 is the checkpoint early stopping would have kept. Prints mean +/- std per
 partition.
 
-    python experiments/contextual_finetune/aggregate_seeds.py <ts1> <ts2> ...
+    python experiments/rsr_pretraining/aggregate_seeds.py <ts1> <ts2> ...
 """
 from __future__ import annotations
 

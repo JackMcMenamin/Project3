@@ -29,7 +29,7 @@ appear in its graph. Words that were never supervised have no edges, so their
 vectors cannot change at all, whatever k is chosen.
 
 Usage:
-    python experiments/contextual_finetune/eval_retrofit_baseline.py
+    python experiments/rsr_pretraining/eval_retrofit_baseline.py
 """
 import os
 import sys

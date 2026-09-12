@@ -44,7 +44,7 @@ def load_our_rsr_vocab(project_root: str) -> set:
     Mirrors load_supervision(use_men=False) in the BERT training script:
     SimVerb-3500 + THINGS, lowercased, underscores -> spaces.
     """
-    sys.path.append(os.path.join(project_root, "experiments", "contextual_finetune"))
+    sys.path.append(os.path.join(project_root, "experiments", "rsr_pretraining"))
     vocab = set()
 
     simverb = os.path.join(project_root, "data", "simverb-3500-data", "data",

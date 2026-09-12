@@ -12,7 +12,7 @@ Note the read-out layer isn't in the CSV - it shows up as the step-0 value, whic
 is vanilla BERT at whatever layer the run evaluated (0.492 at layer 12, 0.523 at
 layer 7). Pass --tag/--note so the two sets don't get mixed up.
 
-    python experiments/contextual_finetune/plot_training_curves.py 20260611_025638 ...
+    python experiments/rsr_pretraining/plot_training_curves.py 20260611_025638 ...
 """
 from __future__ import annotations
 

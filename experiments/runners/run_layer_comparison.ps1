@@ -24,7 +24,7 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$script = "experiments/contextual_finetune/bert_rsr_continued_pretraining.py"
+$script = "experiments/rsr_pretraining/bert_rsr_continued_pretraining.py"
 
 # `powershell -File` hands every argument over as a plain string, so a
 # comma-separated list arrives as one element rather than several. Re-split so

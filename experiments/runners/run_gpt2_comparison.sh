@@ -42,8 +42,8 @@ EVAL_EVERY=200       # 10 SimLex points; MEN is scored at the endpoints.
 LAYER=6
 SEEDS="1 2 3"
 POOL=artifacts/sentences_strict
-SCRIPT=experiments/contextual_finetune/gpt2_rsr_continued_pretraining.py
-LOG=RSR_July/logs
+SCRIPT=experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py
+LOG=logs
 mkdir -p "$LOG"
 
 for seed in $SEEDS; do

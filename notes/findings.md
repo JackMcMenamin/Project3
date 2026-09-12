@@ -128,7 +128,7 @@ column should not be read as statistical power over training runs.
 WordSim-353 was considered as a second transfer benchmark but only 31 percent of
 its pairs have harvested sentences, too thin once partitioned.
 
-Script: `experiments/contextual_finetune/eval_men_transfer.py`.
+Script: `experiments/rsr_pretraining/eval_men_transfer.py`.
 
 ## The original configuration, run on our code: length and lr are ruled out
 
@@ -605,7 +605,7 @@ narrowed.
 
 Span finding verified at 100% over 300 sampled words (space-prefixed form
 catches 293, bare 7); mean 1.56 sub-word pieces per word, so pooling is a real
-choice. Raw probe output: `RSR_July/notes/gpt2_mini_probe_raw.txt`.
+choice. Raw probe output: `notes/gpt2_mini_probe_raw.txt`.
 
 
 ## Templates vs real sentences, and what evaluation context hides
@@ -751,7 +751,7 @@ the two models while mismatching what the layer does. Layer 6 is the functional
 counterpart. Running at 12 would have measured anisotropy rather than RSR.
 
 Runs: `results/gpt2_continued_{rsr,baseline}_main_s{1,2,3}_*.csv`.
-Script: `experiments/contextual_finetune/gpt2_rsr_continued_pretraining.py`.
+Script: `experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py`.
 
 
 ## Post-specialisation reaches the unsupervised words, and harms them
@@ -799,8 +799,8 @@ and explicit retrofitting (Glavas & Vulic 2018) learns its function from the
 constraints directly rather than from an already-specialised table, so it is not
 subject to the same objection. Neither is tested.
 
-Script: `experiments/contextual_finetune/eval_postspec_baseline.py`.
-Raw output: `RSR_July/notes/postspec_raw.txt`.
+Script: `experiments/rsr_pretraining/eval_postspec_baseline.py`.
+Raw output: `notes/postspec_raw.txt`.
 
 ## Loose ends
 

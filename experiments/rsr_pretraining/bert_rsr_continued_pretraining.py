@@ -56,14 +56,14 @@ USAGE
 --------------------------------------------------------------------------------
     # DEFAULT: run vanilla BERT -> RSR BERT AND vanilla -> MLM-only, then print
     # the comparison table (Vanilla / RSR / Delta, partitioned both/one/neither):
-    python experiments/contextual_finetune/bert_rsr_continued_pretraining.py
+    python experiments/rsr_pretraining/bert_rsr_continued_pretraining.py
 
     # just one regime if you want:
-    python experiments/contextual_finetune/bert_rsr_continued_pretraining.py --regime rsr
-    python experiments/contextual_finetune/bert_rsr_continued_pretraining.py --regime baseline
+    python experiments/rsr_pretraining/bert_rsr_continued_pretraining.py --regime rsr
+    python experiments/rsr_pretraining/bert_rsr_continued_pretraining.py --regime baseline
 
     # quick smoke test (tiny, runs on CPU in a couple of minutes):
-    python experiments/contextual_finetune/bert_rsr_continued_pretraining.py --smoke
+    python experiments/rsr_pretraining/bert_rsr_continued_pretraining.py --smoke
 
 Dependencies:  torch  transformers  numpy  pandas  scipy   (optional: torchsort)
 
@@ -130,7 +130,7 @@ except ImportError:
 # ============================================================================
 # Paths  (anchored to the repo root so this runs from anywhere)
 # ============================================================================
-# experiments/contextual_finetune/<this file>  ->  repo root is two parents up.
+# experiments/rsr_pretraining/<this file>  ->  repo root is two parents up.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
 THINGS_DIR = REPO_ROOT / "things_similarity"

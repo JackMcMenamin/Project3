@@ -18,7 +18,7 @@ back and old approaches re-examined.
   - `Mark.txt` — **reference, not throwaway:** Mark Ormerod's RSR thesis
     chapter (Ch. 7). The methodological foundation for the new BERT
     continued-pre-training work; the foundation for
-    `experiments/contextual_finetune/bert_rsr_continued_pretraining.py`.
+    `experiments/rsr_pretraining/bert_rsr_continued_pretraining.py`.
 - **notebooks/** — early exploratory notebooks (`gpt2`, `interleave`, `main`,
   `testing`).
 - **brain_chapter/** — **reference, not throwaway:** Mark Ormerod's three

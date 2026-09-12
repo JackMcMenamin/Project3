@@ -20,7 +20,7 @@ deltas as well as their mean, so the transfer result does not rest on one run th
 way the first version of it did.
 
 Usage:
-    python experiments/contextual_finetune/eval_men_transfer.py
+    python experiments/rsr_pretraining/eval_men_transfer.py
 """
 import os
 import sys

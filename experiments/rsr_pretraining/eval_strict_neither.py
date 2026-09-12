@@ -12,7 +12,7 @@ stemmer is deliberately over-eager, so the strict partition throws away more tha
 it strictly needs to and the resulting number is a conservative floor.
 
 Usage:
-    python experiments/contextual_finetune/eval_strict_neither.py
+    python experiments/rsr_pretraining/eval_strict_neither.py
 """
 import os
 import sys

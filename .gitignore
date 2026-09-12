@@ -53,8 +53,8 @@ things_similarity/
 ~$*
 *.bak
 
-# Only my own additions to RSR_July/src stay tracked.
-/RSR_July/src/*
-!/RSR_July/src/eval_pereira_bert.py
-!/RSR_July/src/eval_downstream_bert.py
-!/RSR_July/src/build_pereira_betas.py
+/brain_and_glue/src/*
+!/brain_and_glue/src/eval_pereira_bert.py
+!/brain_and_glue/src/eval_downstream_bert.py
+!/brain_and_glue/src/build_pereira_betas.py
+/logs/

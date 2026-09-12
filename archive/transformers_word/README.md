@@ -23,6 +23,6 @@ consolidated the older near-duplicate `run_bert_seeds.py` / `run_gpt2_seeds.py`
   real sentences, pooled into cached vectors (a stronger but still
   static-extraction approach).
 - **Continued pre-training (current direction):** see
-  `experiments/contextual_finetune/bert_rsr_continued_pretraining.py` — BERT's own weights train via
+  `experiments/rsr_pretraining/bert_rsr_continued_pretraining.py` — BERT's own weights train via
   interleaved MLM + RSR, answering the "you're just gleaning embeddings"
   critique.

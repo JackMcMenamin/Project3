@@ -29,7 +29,7 @@ Design choices, all made in post-specialisation's favour:
     used a deep feed-forward specialisation function
 
 Usage:
-    python experiments/contextual_finetune/eval_postspec_baseline.py
+    python experiments/rsr_pretraining/eval_postspec_baseline.py
 """
 import os
 import sys

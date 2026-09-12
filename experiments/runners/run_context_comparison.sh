@@ -38,8 +38,8 @@ SEEDS="1 2 3"
 # corpus. Every current result sits on the strict full-Wikipedia pool, so this
 # has to be passed explicitly or the run compares against nothing we have.
 POOL=artifacts/sentences_strict
-SCRIPT=experiments/contextual_finetune/bert_rsr_continued_pretraining.py
-LOG=RSR_July/logs
+SCRIPT=experiments/rsr_pretraining/bert_rsr_continued_pretraining.py
+LOG=logs
 mkdir -p "$LOG"
 
 # done_already <regime> <tag> : is there a finished CSV for this arm?

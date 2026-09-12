@@ -75,11 +75,11 @@ to attach RSR to (layer 7 read better than 12 but gained less, +0.027 against
 
 Usage:
     # which layer of untouched GPT-2 is already best at SimLex?
-    python experiments/contextual_finetune/gpt2_rsr_continued_pretraining.py \
+    python experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py \
         --probe-layers --sentences-dir artifacts/sentences_strict
 
     # the main comparison: matched CLM control against RSR
-    python experiments/contextual_finetune/gpt2_rsr_continued_pretraining.py \
+    python experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py \
         --regime compare --lambda 0.7 --seed 1 \
         --sentences-dir artifacts/sentences_strict
 """
