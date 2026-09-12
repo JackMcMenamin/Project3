@@ -47,3 +47,14 @@ things_similarity/
 # ── Figures: keep, they're small ────────────────────
 # (figures/ is intentionally NOT ignored)
 
+
+# Personal meeting prep, editor lock files, backups
+/docs/private/
+~$*
+*.bak
+
+# Only my own additions to RSR_July/src stay tracked.
+/RSR_July/src/*
+!/RSR_July/src/eval_pereira_bert.py
+!/RSR_July/src/eval_downstream_bert.py
+!/RSR_July/src/build_pereira_betas.py

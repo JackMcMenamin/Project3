@@ -163,6 +163,25 @@ class Config:
     # so the last layer may be a poor read-out point. Evaluation reads the same
     # layer as training, so comparisons stay honest.
     rsr_layer: int | None = None
+    # Read from a learned weighted blend of ALL layers rather than picking one.
+    # Overrides rsr_layer when set. The probe says every partition peaks at a
+    # different depth (all-pairs 7, Neither 9, Both 5), so a single choice is
+    # always wrong for something; this lets the RSR gradient decide the blend.
+    layer_mix = False
+    layer_mix_init = "probe"        # "probe" (seed from the layer probe) | "uniform"
+    layer_mix_partition = "neither" # which probe column seeds the prior
+    layer_mix_temp = 0.02           # sharpness of that prior
+    layer_mix_learnable = True      # False = keep the probe prior fixed
+    layer_mix_lr = 1e-2             # separate lr for the 13 logits; see train_one
+    # Apply the RSR loss at SEVERAL layers at once, each with its own weight,
+    # rather than pooling layers into one vector and taking a single loss. This
+    # is a different mechanism from layer_mix: there the layers are averaged and
+    # one loss is computed on the average; here each listed layer gets its own
+    # soft-Spearman term and the terms are summed. None = single-layer
+    # behaviour, governed by rsr_layer. Evaluation still reads the last layer,
+    # so these runs stay comparable with every other run.
+    rsr_loss_layers: list[int] | None = None
+    rsr_loss_weights: list[float] | None = None   # normalised to sum to 1
     # Train ONLY this encoder layer (freeze embeddings + every other encoder
     # layer; the MLM head stays trainable so the anchor loss can still adapt).
     # None = freezing is governed by num_frozen_layers as usual. Used by the
@@ -172,6 +191,21 @@ class Config:
     # much less noisy soft-Spearman gradient. The first run used N=5 (<=10 pairs)
     # which thrashed and degraded SimLex; 24 is far more stable.
     rsr_batch_size = 24
+    # Context the RSR target words are embedded in during training.
+    #   "sentences" - a real harvested sentence per word, drawn fresh each batch
+    #   "template"  - the fixed null context RSR_TEMPLATE (the original rsr_all arm)
+    # The template makes each word's vector deterministic, which strips the
+    # context noise out of the RSR gradient and turns the task into rearranging
+    # fixed points rather than reshaping the encoder.
+    rsr_context: str = "sentences"
+    # Contexts to score held-out SimLex in. The FIRST is primary: it drives early
+    # stopping and keeps the unprefixed CSV columns, so existing aggregation and
+    # plotting code is unaffected. Extra contexts are logged with a prefix, so a
+    # single run yields one curve per context.
+    #   "sentences" - mean over up to 20 harvested sentences (ours)
+    #   "bare"      - the word alone, no sentence (the original --eval_mode default)
+    #   "template"  - the same null context used for template training
+    eval_contexts: tuple = ("sentences",)
     mlm_batch_size = 16             # sentences per MLM batch
     mlm_probability = 0.15          # standard masking rate
     learning_rate = 5e-5
@@ -203,6 +237,17 @@ class Config:
     #                   MLM is always present, which tends to stop RSR running away.
     combine = "interleave"
     rsr_lambda = 0.5     # weight on the RSR term in "weighted" mode (Mark used 0.9)
+    # Decay the RSR weight toward zero as training runs, following McClure &
+    # Kriegeskorte (2015), "Representational Distance Learning for Deep Neural
+    # Networks" (arXiv 1511.03979), who apply auxiliary RDM losses and decay
+    # their weight with  alpha_t = alpha_0 * (1 - t / t_max).  Their reasoning
+    # is that the auxiliary term should steer the parameters early and then get
+    # out of the way so the main objective converges.  That matches what our
+    # training curves show: held-out SimLex peaks by step 100-200 and then
+    # falls, i.e. sustained RSR eventually costs more than it gives.
+    #   "none"   - constant rsr_lambda, the original behaviour
+    #   "linear" - rsr_lambda * (1 - step / steps), reaching 0 at the last step
+    rsr_lambda_decay = "none"
 
     # Early stopping: track held-out SimLex at each eval and keep the best
     # checkpoint, so a run reports its peak rather than an overshot final model.
@@ -394,6 +439,77 @@ def find_subword_span(sent_ids: list[int], target_ids: list[int]) -> tuple[int, 
 
 
 # ============================================================================
+# Learned read-out across layers
+# ============================================================================
+# Held-out SimLex by layer for untouched bert-base, measured on the strict
+# (full-Wikipedia) sentence pool: results/bert_layer_probe_20260818_194711.csv.
+# Every partition peaks somewhere different - all-pairs at 8, Neither at 9,
+# Both at 7, One at 2 - which is the argument for mixing the layers instead of
+# committing to one. Layer 11 is a pronounced trough and 12 recovers slightly.
+#
+# The earlier probe on the Simple English pool
+# (results/bert_layer_probe_20260702_005355.csv) gives the same ordering with
+# different absolute values, so the choice of corpus doesn't change which layers
+# matter - only how far apart they sit.
+PROBE_RHO = {
+    "all":     [.520, .511, .516, .521, .520, .518, .518, .521, .523, .512, .482, .447, .480],
+    "neither": [.530, .519, .527, .524, .528, .525, .528, .539, .553, .554, .522, .489, .515],
+    "both":    [.363, .358, .362, .390, .403, .421, .423, .428, .426, .400, .363, .337, .366],
+    "one":     [.656, .659, .662, .657, .642, .630, .625, .628, .624, .619, .610, .564, .594],
+}
+
+
+class ScalarMix(nn.Module):
+    """Convex combination of BERT's 13 hidden states, ELMo-style (Peters 2018).
+
+        s = softmax(w)          w is 13 learnable scalars
+        h = sum_l  s_l * h_l
+
+    Softmax rather than free weights keeps the read-out a weighted average of
+    layers, so the result stays on the same scale as any single layer and the
+    weights read directly as "how much of layer l".
+
+    There's no gamma scaling term, unlike the original: the RSR loss compares
+    vectors by cosine similarity, which is invariant to a global rescale, so
+    gamma would be a parameter that cannot affect the loss.
+
+    `init` seeds w from the layer probe, so training starts biased toward the
+    layers that already carry the most lexical semantics instead of at a flat
+    average. `temperature` sets how sharp that prior is - the probe's rho values
+    span about 0.06, so 0.02 gives a clear preference without collapsing onto
+    one layer.
+    """
+
+    def __init__(self, n_layers: int = 13, init: str = "probe",
+                 init_partition: str = "neither", temperature: float = 0.02,
+                 learnable: bool = True):
+        super().__init__()
+        if init == "probe":
+            rho = torch.tensor(PROBE_RHO[init_partition], dtype=torch.float)
+            w = (rho - rho.mean()) / temperature
+        elif init == "uniform":
+            w = torch.zeros(n_layers)
+        else:
+            raise ValueError(f"unknown layer-mix init: {init}")
+        self.w = nn.Parameter(w, requires_grad=learnable)
+
+    def weights(self) -> torch.Tensor:
+        return torch.softmax(self.w, dim=0)
+
+    def forward(self, hidden_states) -> torch.Tensor:
+        # hidden_states: 13-tuple of (N, L, H) -> (13, N, L, H)
+        stacked = torch.stack(hidden_states, dim=0)
+        s = self.weights().view(-1, 1, 1, 1)
+        return (s * stacked).sum(dim=0)
+
+    def describe(self, top: int = 5) -> str:
+        s = self.weights().detach().cpu()
+        order = torch.argsort(s, descending=True)[:top]
+        parts = [f"L{int(i)}={s[i]:.3f}" for i in order]
+        return "  ".join(parts) + f"   (entropy {float(-(s * s.log()).sum()):.2f})"
+
+
+# ============================================================================
 # Model:  BERT-for-MLM
 # ============================================================================
 class BertRSR(nn.Module):
@@ -410,6 +526,18 @@ class BertRSR(nn.Module):
         self.projection = (
             nn.Linear(hidden, cfg.projection_dim) if cfg.projection_dim > 0
             else nn.Identity()
+        )
+
+        # Read from a weighted blend of all 13 layers instead of one. Takes
+        # precedence over rsr_layer; the 13 mix weights train alongside the
+        # backbone off the same RSR gradient.
+        self.layer_mix = (
+            ScalarMix(self.mlm.config.num_hidden_layers + 1,
+                      init=cfg.layer_mix_init,
+                      init_partition=cfg.layer_mix_partition,
+                      temperature=cfg.layer_mix_temp,
+                      learnable=cfg.layer_mix_learnable)
+            if cfg.layer_mix else None
         )
 
         # --- optionally freeze embeddings + first N encoder layers ---
@@ -463,7 +591,11 @@ class BertRSR(nn.Module):
         # hidden_states[12] == last_hidden_state. rsr_layer=None keeps the
         # original behaviour (last layer); rsr_layer=k reads layer k instead
         # (Vulic et al. 2020: middle layers carry the most lexical semantics).
-        if self.cfg.rsr_layer is None:
+        if self.layer_mix is not None:
+            out = self.mlm.bert(input_ids=input_ids, attention_mask=attention_mask,
+                                output_hidden_states=True)
+            hidden = self.layer_mix(out.hidden_states)
+        elif self.cfg.rsr_layer is None:
             out = self.mlm.bert(input_ids=input_ids, attention_mask=attention_mask)
             hidden = out.last_hidden_state  # (N, L, H): N sentences, L tokens, H=768
         else:
@@ -480,6 +612,26 @@ class BertRSR(nn.Module):
             vecs.append(hidden[j, start:end].mean(dim=0))   # mean-pool sub-words
         stacked = torch.stack(vecs, dim=0)
         return self.projection(stacked)
+
+    def target_vectors_multi(self, input_ids, attention_mask, spans,
+                             layers: list[int]) -> dict[int, torch.Tensor]:
+        """Same pooling as target_vectors, but returns one (N, d) tensor per
+        requested layer from a SINGLE forward pass. The multi-layer RSR loss
+        needs vectors from several layers each step; re-running BERT once per
+        layer would cost as many forwards as there are layers."""
+        out = self.mlm.bert(input_ids=input_ids, attention_mask=attention_mask,
+                            output_hidden_states=True)
+        per_layer: dict[int, torch.Tensor] = {}
+        for L in layers:
+            hidden = out.hidden_states[L]
+            vecs = []
+            for j, (start, end) in enumerate(spans):
+                seq_len = int(attention_mask[j].sum().item())
+                end_j = min(end, seq_len)
+                start_j = min(start, max(seq_len - 1, 0))
+                vecs.append(hidden[j, start_j:end_j].mean(dim=0))
+            per_layer[L] = self.projection(torch.stack(vecs, dim=0))
+        return per_layer
 
 
 # ============================================================================
@@ -527,11 +679,16 @@ class RSRBatchSampler:
         for word in pool:
             if len(chosen_words) == N:
                 break
-            sents = self._sentences(word)
-            if not sents:
-                continue
+            if self.cfg.rsr_context == "template":
+                # The original rsr_all arm: one fixed null context, so the word's vector
+                # is deterministic and the RSR gradient carries no context noise.
+                sents = [RSR_TEMPLATE.format(word=word)]
+            else:
+                sents = self._sentences(word)
+                if not sents:
+                    continue
+                random.shuffle(sents)
             target_ids = self.tokenizer(word, add_special_tokens=False)["input_ids"]
-            random.shuffle(sents)
             for sent in sents[:8]:  # try a few sentences for this word
                 enc = self.tokenizer(
                     sent, add_special_tokens=True, truncation=True,
@@ -579,8 +736,29 @@ def rsr_loss_for_batch(model: BertRSR, batch, spans, words, sim_lookup, cfg) -> 
     """
     input_ids = batch["input_ids"].to(DEVICE)
     attention = batch["attention_mask"].to(DEVICE)
-    vecs = model.target_vectors(input_ids, attention, spans)  # (N, d), one row per word
 
+    if cfg.rsr_loss_layers:
+        # One soft-Spearman term per listed layer, summed with the configured
+        # weights. The weights sum to 1, so the total sits on the same scale as
+        # a single-layer loss and rsr_lambda keeps its meaning.
+        per_layer = model.target_vectors_multi(input_ids, attention, spans,
+                                               cfg.rsr_loss_layers)
+        total = None
+        for L, w in zip(cfg.rsr_loss_layers, cfg.rsr_loss_weights):
+            term = _pair_loss(per_layer[L], words, sim_lookup, cfg)
+            if term is None:
+                return None   # pair masking is layer-independent: all or none
+            total = w * term if total is None else total + w * term
+        return total
+
+    vecs = model.target_vectors(input_ids, attention, spans)  # (N, d), one row per word
+    return _pair_loss(vecs, words, sim_lookup, cfg)
+
+
+def _pair_loss(vecs, words, sim_lookup, cfg) -> torch.Tensor | None:
+    """Steps 2 and 3 above for one set of word vectors: cosine for every scored
+    pair, then 1 - soft_spearman against the human scores. Split out so the
+    multi-layer variant can reuse it once per layer."""
     # Build the two aligned vectors: model_sims[k] and human_sims[k] are the
     # same pair, so soft_spearman compares like with like.
     model_sims, human_sims = [], []
@@ -652,17 +830,32 @@ class MLMBatcher:
 # ============================================================================
 # Evaluation on held-out SimLex-999  (in-context, same as training)
 # ============================================================================
+# The null context from the original rsr_all arm, verbatim (samplers.py:107 there).
+# Every word gets this same frame, so its vector is identical on every batch.
+RSR_TEMPLATE = "The word is {word}."
+
+
 def embed_words_in_context(model: BertRSR, words: list[str], cfg: Config,
-                           sent_cache: dict[str, list[str]], max_sents: int = 20) -> dict[str, torch.Tensor]:
-    """Mean contextual projected vector per word, averaged over up to `max_sents`
-    of its harvested sentences. Returns only words that could be embedded."""
+                           sent_cache: dict[str, list[str]], max_sents: int = 20,
+                           context: str = "sentences") -> dict[str, torch.Tensor]:
+    """Mean contextual projected vector per word. `context` picks what the word
+    is embedded in:
+        "sentences" - up to `max_sents` harvested sentences, averaged (ours)
+        "bare"      - the word on its own, no sentence at all (the original default)
+        "template"  - RSR_TEMPLATE, the null frame the original template arm trains on
+    Returns only words that could be embedded."""
     model.eval()
     out: dict[str, torch.Tensor] = {}
     with torch.no_grad():
         for w in words:
-            if w not in sent_cache:
-                sent_cache[w] = load_sentences_for(w)
-            sents = sent_cache[w]
+            if context == "bare":
+                sents = [w]
+            elif context == "template":
+                sents = [RSR_TEMPLATE.format(word=w)]
+            else:
+                if w not in sent_cache:
+                    sent_cache[w] = load_sentences_for(w)
+                sents = sent_cache[w]
             if not sents:
                 continue
             target_ids = model.tokenizer(w, add_special_tokens=False)["input_ids"]
@@ -684,7 +877,8 @@ def embed_words_in_context(model: BertRSR, words: list[str], cfg: Config,
     return out
 
 
-def evaluate_simlex(model: BertRSR, simlex, supervised_vocab, cfg, sent_cache) -> dict:
+def evaluate_simlex(model: BertRSR, simlex, supervised_vocab, cfg, sent_cache,
+                    context: str = "sentences") -> dict:
     """Spearman vs human SimLex, overall and split by RSR-supervision overlap.
 
     The split is the whole point of the evaluation. For each held-out SimLex
@@ -704,12 +898,18 @@ def evaluate_simlex(model: BertRSR, simlex, supervised_vocab, cfg, sent_cache) -
         cats["all"].append((w1, w2, s))   # every pair also counts toward "all"
         cats[cat].append((w1, w2, s))
 
+    # Embed the whole vocabulary ONCE. "all" already contains every word, and
+    # both+one+neither also cover every word between them, so embedding per
+    # partition did the work twice. Embedding is deterministic (the first
+    # max_sents harvested sentences, no sampling), so sharing one dict across
+    # partitions gives identical numbers for half the compute.
+    all_words = list({w for p in simlex for w in p[:2]})
+    emb = embed_words_in_context(model, all_words, cfg, sent_cache, context=context)
+
     results = {}
     for name, pairs in cats.items():
-        # Embed each word in context, then score each pair by cosine similarity
-        # and correlate the model's similarities with the human SimLex scores.
-        words = list({w for p in pairs for w in p[:2]})
-        emb = embed_words_in_context(model, words, cfg, sent_cache)
+        # Score each pair by cosine similarity and correlate the model's
+        # similarities with the human SimLex scores.
         model_s, human_s = [], []
         for w1, w2, s in pairs:
             if w1 in emb and w2 in emb:   # skip pairs we couldn't embed (no sentences)
@@ -795,41 +995,68 @@ def probe_layers(cfg: Config, max_sents: int = 20) -> pd.DataFrame:
                 print(f"  embedded {wi + 1}/{len(words)} words "
                       f"({time.time() - t0:.0f}s)", flush=True)
 
-    # Score every layer on every partition.
-    rows = []
-    for L in range(n_layers + 1):
-        row = {"layer": L}
+    # Score a set of per-word vectors on every partition.
+    def score(vecs: dict[str, torch.Tensor]) -> dict:
+        out = {}
         for name, pairs in cats.items():
             model_s, human_s = [], []
             for w1, w2, s in pairs:
-                if w1 in emb[L] and w2 in emb[L]:
-                    cos = F.cosine_similarity(emb[L][w1].unsqueeze(0),
-                                              emb[L][w2].unsqueeze(0)).item()
+                if w1 in vecs and w2 in vecs:
+                    cos = F.cosine_similarity(vecs[w1].unsqueeze(0),
+                                              vecs[w2].unsqueeze(0)).item()
                     model_s.append(cos)
                     human_s.append(s)
             rho, _ = spearmanr(human_s, model_s)
-            row[f"{name}_rho"] = float(rho)
-            row[f"{name}_n"] = len(model_s)
-        rows.append(row)
+            out[f"{name}_rho"] = float(rho)
+            out[f"{name}_n"] = len(model_s)
+        return out
+
+    # Two read-out families, following Vulic et al. 2020 (EMNLP) Table 1:
+    #     Ln         - layer n on its own
+    #     AVG(L<=n)  - uniform mean over layers 0..n inclusive
+    # Their finding is that averaging over a subset of the bottom layers beats
+    # any single layer, while averaging over ALL layers hurts. Both families are
+    # free here: the prefix means are built from the per-layer vectors already
+    # computed above, so no extra forward passes are needed.
+    rows = [{"mode": "Ln", "layer": L, **score(emb[L])}
+            for L in range(n_layers + 1)]
+
+    running: dict[str, torch.Tensor] = {}
+    for n in range(n_layers + 1):
+        for w, v in emb[n].items():
+            running[w] = v if w not in running else running[w] + v
+        rows.append({"mode": "AVG(L<=n)", "layer": n,
+                     **score({w: v / (n + 1) for w, v in running.items()})})
+
     df = pd.DataFrame(rows)
 
-    print("\n" + "=" * 62, flush=True)
-    print("LAYER PROBE  (vanilla SimLex rho per hidden layer; 0 = embeddings)", flush=True)
-    print("=" * 62, flush=True)
-    print(f"{'layer':>5}{'all':>10}{'both':>10}{'one':>10}{'neither':>10}", flush=True)
-    best = df["all_rho"].idxmax()
-    for _, r in df.iterrows():
-        mark = "  <-- best (all)" if r["layer"] == df.loc[best, "layer"] else ""
-        print(f"{int(r['layer']):>5}{r['all_rho']:>10.4f}{r['both_rho']:>10.4f}"
-              f"{r['one_rho']:>10.4f}{r['neither_rho']:>10.4f}{mark}", flush=True)
-    print(f"\nLast layer (12) all-pairs rho: {df.iloc[-1]['all_rho']:.4f} | "
-          f"best layer {int(df.loc[best, 'layer'])}: {df.loc[best, 'all_rho']:.4f}", flush=True)
+    print("\n" + "=" * 72, flush=True)
+    print("LAYER PROBE  (vanilla SimLex rho; layer 0 = input embeddings)", flush=True)
+    print("=" * 72, flush=True)
+    for mode in ("Ln", "AVG(L<=n)"):
+        sub = df[df["mode"] == mode]
+        b_all, b_nei = sub["all_rho"].idxmax(), sub["neither_rho"].idxmax()
+        print(f"\n  {mode}", flush=True)
+        print(f"  {'layer':>5}{'all':>10}{'both':>10}{'one':>10}{'neither':>10}", flush=True)
+        for idx, r in sub.iterrows():
+            mark = ("  <-- best all" if idx == b_all else "")
+            mark += "  <-- best neither" if idx == b_nei else ""
+            print(f"  {int(r['layer']):>5}{r['all_rho']:>10.4f}{r['both_rho']:>10.4f}"
+                  f"{r['one_rho']:>10.4f}{r['neither_rho']:>10.4f}{mark}", flush=True)
+
+    ln, av = df[df["mode"] == "Ln"], df[df["mode"] == "AVG(L<=n)"]
+    for part in ("all", "neither"):
+        bl = ln.loc[ln[f"{part}_rho"].idxmax()]
+        ba = av.loc[av[f"{part}_rho"].idxmax()]
+        verdict = "prefix average wins" if ba[f"{part}_rho"] > bl[f"{part}_rho"] else "single layer wins"
+        print(f"\n  {part:>8}:  best single L{int(bl['layer'])}={bl[f'{part}_rho']:.4f}   "
+              f"best AVG(L<={int(ba['layer'])})={ba[f'{part}_rho']:.4f}   -> {verdict}", flush=True)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = RESULTS_DIR / f"bert_layer_probe_{ts}.csv"
     df.to_csv(out, index=False)
-    print(f"Saved layer probe to: {out}", flush=True)
+    print(f"\nSaved layer probe to: {out}", flush=True)
     return df
 
 
@@ -859,13 +1086,26 @@ class Shared:
 
 
 def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
-              verbose: bool = True) -> pd.DataFrame:
-    """Train `model` under `regime` using already-loaded `shared` data."""
+              verbose: bool = True, partial_path=None) -> pd.DataFrame:
+    """Train `model` under `regime` using already-loaded `shared` data.
+
+    `partial_path`: if given, the history so far is rewritten there after every
+    evaluation, so a run killed partway leaves usable curves behind instead of
+    nothing."""
     shared.rsr_sampler.cfg = cfg                       # honour this run's batch size etc.
     mlm_batcher = MLMBatcher(model.tokenizer, cfg, shared.mlm_sentences)
-    optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()), lr=cfg.learning_rate
-    )
+    # The 13 mix logits need their own, much larger learning rate. Adam moves a
+    # parameter by roughly its lr per step, so at the backbone's 5e-5 the logits
+    # shift by at most 0.04 over a whole run against an initial spread of ~3.1 -
+    # i.e. the blend would sit frozen at its prior and "learned" would be a lie.
+    mix_params = [p for n, p in model.named_parameters()
+                  if n.startswith("layer_mix") and p.requires_grad]
+    backbone = [p for n, p in model.named_parameters()
+                if not n.startswith("layer_mix") and p.requires_grad]
+    groups = [{"params": backbone, "lr": cfg.learning_rate}]
+    if mix_params:
+        groups.append({"params": mix_params, "lr": cfg.layer_mix_lr})
+    optimizer = torch.optim.Adam(groups, lr=cfg.learning_rate)
     eval_cache: dict[str, list[str]] = {}
     history = []
 
@@ -884,11 +1124,38 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
             return None
         return model.mlm_loss(input_ids, attn, labels)
 
-    res = evaluate_simlex(model, shared.simlex, shared.supervised_vocab, cfg, eval_cache)
+    def lambda_at(step: int) -> float:
+        """RSR weight for this step. Constant unless a decay schedule is set;
+        `step` is 1-based, so a linear schedule starts at the full weight and
+        reaches 0 on the final step."""
+        if cfg.rsr_lambda_decay == "linear":
+            return cfg.rsr_lambda * max(0.0, 1.0 - (step - 1) / max(1, cfg.steps - 1))
+        return cfg.rsr_lambda
+
+    if verbose and cfg.rsr_lambda_decay != "none" and regime == "rsr":
+        pts = [1, cfg.steps // 4, cfg.steps // 2, 3 * cfg.steps // 4, cfg.steps]
+        print("RSR weight schedule (" + cfg.rsr_lambda_decay + "): "
+              + "  ".join(f"step {p}: {lambda_at(p):.3f}" for p in pts), flush=True)
+
+    # Score the baseline in every context, so each curve has its own vanilla
+    # reference. Contexts differ in coverage: "bare" and "template" can embed any
+    # word, while "sentences" drops words with no harvested sentences, so the
+    # partition sizes are not identical across contexts and each curve must be
+    # read against its own step-0 row rather than across contexts.
+    contexts0 = tuple(cfg.eval_contexts) or ("sentences",)
+    by_ctx0 = {c: evaluate_simlex(model, shared.simlex, shared.supervised_vocab,
+                                  cfg, eval_cache, context=c)
+               for c in contexts0}
+    res = by_ctx0[contexts0[0]]
     if verbose:
         print("\nBaseline evaluation (before any training):", flush=True)
-        print_eval("step 0", res)
-    history.append({"step": 0, **{f"{k}_{m}": res[k][m] for k in res for m in res[k]}})
+        for c in contexts0:
+            print_eval("step 0" if c == contexts0[0] else f"step 0 {c}", by_ctx0[c])
+    row0 = {"step": 0}
+    for c, r in by_ctx0.items():
+        pre = "" if c == contexts0[0] else c + "_"
+        row0.update({f"{pre}{k}_{m}": r[k][m] for k in r for m in r[k]})
+    history.append(row0)
 
     # Early-stopping bookkeeping: remember the best-SimLex state.
     best_metric = res[cfg.early_stop_metric]["rho"]
@@ -926,7 +1193,8 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
             rsr_loss = do_rsr_loss()
             if mlm_loss is None or rsr_loss is None:
                 continue
-            loss = (1.0 - cfg.rsr_lambda) * mlm_loss + cfg.rsr_lambda * rsr_loss
+            lam = lambda_at(step)
+            loss = (1.0 - lam) * mlm_loss + lam * rsr_loss
             running_mlm += mlm_loss.item(); n_mlm += 1
             running_rsr += rsr_loss.item(); n_rsr += 1
 
@@ -959,13 +1227,27 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
         if step % cfg.eval_every == 0:
             mlm_avg = running_mlm / max(n_mlm, 1)
             rsr_avg = running_rsr / max(n_rsr, 1)
-            res = evaluate_simlex(model, shared.simlex, shared.supervised_vocab, cfg, eval_cache)
+            contexts = tuple(cfg.eval_contexts) or ("sentences",)
+            by_ctx = {c: evaluate_simlex(model, shared.simlex, shared.supervised_vocab,
+                                         cfg, eval_cache, context=c)
+                      for c in contexts}
+            res = by_ctx[contexts[0]]      # primary context drives early stopping
             if verbose:
                 print(f"step {step}/{cfg.steps}  mlm_loss={mlm_avg:.4f}  "
                       f"rsr_loss={rsr_avg:.4f}  ({time.time()-t0:.0f}s)", flush=True)
-                print_eval(f"step {step}", res)
-            history.append({"step": step, "mlm_loss": mlm_avg, "rsr_loss": rsr_avg,
-                            **{f"{k}_{m}": res[k][m] for k in res for m in res[k]}})
+                for c in contexts:
+                    print_eval(f"step {step}" if c == contexts[0] else f"step {step} {c}",
+                               by_ctx[c])
+            row = {"step": step, "mlm_loss": mlm_avg, "rsr_loss": rsr_avg}
+            for c, r in by_ctx.items():
+                # primary keeps the bare column names so downstream code is unchanged
+                pre = "" if c == contexts[0] else c + "_"
+                row.update({f"{pre}{k}_{m}": r[k][m] for k in r for m in r[k]})
+            history.append(row)
+            # Flush after every eval. A long run that dies partway used to lose
+            # everything, because the CSV was only written on completion.
+            if partial_path is not None:
+                pd.DataFrame(history).to_csv(partial_path, index=False)
             running_mlm, running_rsr, n_mlm, n_rsr = 0.0, 0.0, 0, 0
 
             # EARLY STOPPING. RSR overshoots: SimLex climbs, peaks, then decays
@@ -987,6 +1269,13 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
 
     df = pd.DataFrame(history)
     df.attrs["best_step"] = best_step
+    # Which layers the blend actually settled on - report it after the rollback
+    # so the weights match the checkpoint the numbers describe.
+    if model.layer_mix is not None:
+        weights = model.layer_mix.weights().detach().cpu().tolist()
+        df.attrs["layer_mix_weights"] = weights
+        if verbose:
+            print(f"Layer mix, heaviest first: {model.layer_mix.describe()}", flush=True)
     return df
 
 
@@ -1010,7 +1299,11 @@ def train(cfg: Config, regime: str, shared: Shared | None = None,
     if shared is None:
         shared = Shared(model.tokenizer, cfg)
     print("\nTraining ...", flush=True)
-    df = train_one(cfg, regime, model, shared, verbose=True)
+    # The tag distinguishes arms that share a regime and seed; without it the
+    # sentences and template arms of one seed overwrite each other's partials.
+    _slug = save_tag or f"s{cfg.seed}"
+    df = train_one(cfg, regime, model, shared, verbose=True,
+                   partial_path=RESULTS_DIR / f"partial_{regime}_{_slug}.csv")
 
     if save_tag:
         MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1020,12 +1313,21 @@ def train(cfg: Config, regime: str, shared: Shared | None = None,
         torch.save(model.mlm.state_dict(), out)
         meta = {
             "regime": regime, "combine": cfg.combine, "rsr_lambda": cfg.rsr_lambda,
+            "rsr_lambda_decay": cfg.rsr_lambda_decay,
             "rsr_layer": cfg.rsr_layer, "steps": cfg.steps, "seed": cfg.seed,
             "learning_rate": cfg.learning_rate, "rsr_batch_size": cfg.rsr_batch_size,
             "num_frozen_layers": cfg.num_frozen_layers,
             "projection_dim": cfg.projection_dim, "use_men": cfg.use_men,
             "best_step": int(df.attrs.get("best_step", -1)),
             "model_name": cfg.model_name,
+            # The checkpoint above is model.mlm only, so the 13 read-out weights
+            # would otherwise be lost and anything loading this file would
+            # silently fall back to reading a single layer. Downstream evals must
+            # re-apply these to reproduce the vectors these numbers describe.
+            "layer_mix": cfg.layer_mix,
+            "layer_mix_weights": df.attrs.get("layer_mix_weights"),
+            "rsr_loss_layers": cfg.rsr_loss_layers,
+            "rsr_loss_weights": cfg.rsr_loss_weights,
         }
         with open(out.with_suffix(".json"), "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
@@ -1253,6 +1555,11 @@ def main() -> None:
                          "batches) or weighted (both per batch, Mark's approach)")
     ap.add_argument("--lambda", dest="rsr_lambda", type=float, default=None,
                     help="weight on RSR term in weighted mode (0..1; Mark used 0.9)")
+    ap.add_argument("--lambda-decay", dest="rsr_lambda_decay", choices=["none", "linear"],
+                    default=None,
+                    help="decay the RSR weight toward 0 across training, as in McClure & "
+                         "Kriegeskorte 2015 (alpha_t = alpha_0 * (1 - t/t_max)). Default none "
+                         "(constant lambda). Only affects --combine weighted")
     ap.add_argument("--steps", type=int, default=None, help="override total optimiser steps")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--lr", type=float, default=None)
@@ -1274,6 +1581,25 @@ def main() -> None:
                     help="hidden layer the RSR target vectors are read from (0=embeddings, "
                          "1..12=encoder layers; default = last layer). Middle layers often "
                          "carry the most lexical semantics (Vulic et al. 2020)")
+    ap.add_argument("--rsr-loss-layers", type=str, default=None,
+                    help="apply the RSR loss at SEVERAL layers at once, comma separated "
+                         "(e.g. 7,9,12). Each layer gets its own loss term and the terms "
+                         "are summed. Different from --layer-mix, which averages the "
+                         "layers into one vector and takes a single loss. Evaluation "
+                         "stays on the last layer so numbers remain comparable")
+    ap.add_argument("--rsr-loss-weights", type=str, default=None,
+                    help="comma-separated weights for --rsr-loss-layers (default: equal). "
+                         "Normalised to sum to 1")
+    ap.add_argument("--rsr-context", choices=["sentences", "template"], default=None,
+                    help="what RSR target words are embedded in during training: real "
+                         "harvested sentences (default), or the fixed null context "
+                         "\"The word is X.\" used by the original rsr_all arm. The template "
+                         "makes each word's vector deterministic")
+    ap.add_argument("--eval-contexts", type=str, default=None,
+                    help="comma-separated contexts to score SimLex in, e.g. "
+                         "sentences,bare,template. The first is primary: it drives early "
+                         "stopping and keeps the unprefixed CSV columns. Lets one run "
+                         "separate a training effect from an evaluation artefact")
     ap.add_argument("--train-only-layer", type=int, default=None,
                     help="freeze everything except this single encoder layer (1..12); the "
                          "MLM head stays trainable. For the layer-localisation experiment")
@@ -1297,13 +1623,48 @@ def main() -> None:
                          "layer at a time (the unfreeze-one-layer experiment)")
     ap.add_argument("--smoke", action="store_true",
                     help="tiny fast run to check everything wires up (CPU-friendly)")
+    ap.add_argument("--layer-mix", action="store_true",
+                    help="read RSR vectors from a learned softmax blend of all 13 "
+                         "hidden layers instead of one (overrides --rsr-layer)")
+    ap.add_argument("--layer-mix-init", choices=["probe", "uniform"], default=None,
+                    help="seed the blend from the layer probe (default) or flat")
+    ap.add_argument("--layer-mix-partition", choices=["all", "both", "one", "neither"],
+                    default=None, help="which probe column seeds the prior "
+                                       "(default neither, the generalisation test)")
+    ap.add_argument("--layer-mix-temp", type=float, default=None,
+                    help="sharpness of the probe prior (default 0.02)")
+    ap.add_argument("--layer-mix-lr", type=float, default=None,
+                    help="learning rate for the 13 blend logits (default 1e-2). Much "
+                         "larger than the backbone lr on purpose - see train_one")
+    ap.add_argument("--freeze-layer-mix", action="store_true",
+                    help="hold the blend at its initial values instead of learning it")
+    ap.add_argument("--sentences-dir", default=None,
+                    help="alternate harvested sentence pool, relative to the repo root "
+                         "(default artifacts/sentences). Use artifacts/sentences_clean "
+                         "for the filtered pool, or sentences_strict for the re-harvest.")
     args = ap.parse_args()
+
+    if args.sentences_dir is not None:
+        global SENTENCES_DIR
+        SENTENCES_DIR = REPO_ROOT / args.sentences_dir
+        if not SENTENCES_DIR.is_dir():
+            raise SystemExit(f"no such sentence pool: {SENTENCES_DIR}")
+        n = sum(1 for _ in SENTENCES_DIR.glob("*.jsonl"))
+        print(f"Sentence pool: {SENTENCES_DIR}  ({n} target files)", flush=True)
 
     cfg = Config()
     if args.combine is not None:
         cfg.combine = args.combine
     if args.rsr_lambda is not None:
         cfg.rsr_lambda = args.rsr_lambda
+    if args.rsr_lambda_decay is not None:
+        cfg.rsr_lambda_decay = args.rsr_lambda_decay
+    if args.rsr_context:
+        cfg.rsr_context = args.rsr_context
+    if args.eval_contexts:
+        cfg.eval_contexts = tuple(c.strip() for c in args.eval_contexts.split(",") if c.strip())
+        if cfg.rsr_lambda_decay != "none" and cfg.combine != "weighted":
+            raise SystemExit("--lambda-decay only applies to --combine weighted")
     if args.steps is not None:
         cfg.steps = args.steps
     if args.seed is not None:
@@ -1324,6 +1685,42 @@ def main() -> None:
         cfg.early_stop = False
     if args.rsr_layer is not None:
         cfg.rsr_layer = args.rsr_layer
+    if args.rsr_loss_layers is not None:
+        layers = [int(x) for x in args.rsr_loss_layers.split(",") if x.strip()]
+        if not layers:
+            raise SystemExit("--rsr-loss-layers: no layers given")
+        if any(L < 0 or L > 12 for L in layers):
+            raise SystemExit("--rsr-loss-layers: layers must be 0..12")
+        if len(set(layers)) != len(layers):
+            raise SystemExit("--rsr-loss-layers: duplicate layers")
+        if args.rsr_loss_weights is not None:
+            ws = [float(x) for x in args.rsr_loss_weights.split(",") if x.strip()]
+            if len(ws) != len(layers):
+                raise SystemExit("--rsr-loss-weights: need one weight per layer")
+            if any(w < 0 for w in ws):
+                raise SystemExit("--rsr-loss-weights: weights must be >= 0")
+        else:
+            ws = [1.0] * len(layers)
+        tot = sum(ws)
+        if tot <= 0:
+            raise SystemExit("--rsr-loss-weights: weights must sum to > 0")
+        cfg.rsr_loss_layers = layers
+        cfg.rsr_loss_weights = [w / tot for w in ws]
+        print("RSR loss applied at layers " + ", ".join(
+            f"L{L} (w={w:.3f})" for L, w in zip(layers, cfg.rsr_loss_weights))
+            + "; evaluation reads the last layer", flush=True)
+    if args.layer_mix:
+        cfg.layer_mix = True
+    if args.layer_mix_init is not None:
+        cfg.layer_mix_init = args.layer_mix_init
+    if args.layer_mix_partition is not None:
+        cfg.layer_mix_partition = args.layer_mix_partition
+    if args.layer_mix_temp is not None:
+        cfg.layer_mix_temp = args.layer_mix_temp
+    if args.layer_mix_lr is not None:
+        cfg.layer_mix_lr = args.layer_mix_lr
+    if args.freeze_layer_mix:
+        cfg.layer_mix_learnable = False
     if args.train_only_layer is not None:
         cfg.train_only_layer = args.train_only_layer
         # RSR should read from the layer being trained unless told otherwise.
@@ -1356,21 +1753,30 @@ def main() -> None:
         mode_desc = (f"weighted lambda={cfg.rsr_lambda}" if cfg.combine == "weighted"
                      else f"interleaved {cfg.mlm_per_cycle}MLM:"
                           f"{cfg.interleave_cycle - cfg.mlm_per_cycle}RSR")
+        # Each arm is written as soon as it finishes. Holding both until the end
+        # meant a crash during the second arm discarded a completed first one.
+        suffix = f"_{args.save_tag}" if args.save_tag else ""
         print(f"\n########## RSR REGIME ({mode_desc}) ##########", flush=True)
         rsr_df = train(cfg, "rsr", shared, save_tag=args.save_tag)
+        rsr_out = RESULTS_DIR / f"bert_continued_rsr{suffix}_{ts}.csv"
+        rsr_df.to_csv(rsr_out, index=False)
+        print(f"Saved -> {rsr_out}", flush=True)
+
         print("\n########## BASELINE REGIME (continued MLM only) ##########", flush=True)
         base_df = train(cfg, "baseline", shared, save_tag=args.save_tag)
-
-        rsr_df.to_csv(RESULTS_DIR / f"bert_continued_rsr_{ts}.csv", index=False)
-        base_df.to_csv(RESULTS_DIR / f"bert_continued_baseline_{ts}.csv", index=False)
+        base_out = RESULTS_DIR / f"bert_continued_baseline{suffix}_{ts}.csv"
+        base_df.to_csv(base_out, index=False)
+        print(f"Saved -> {base_out}", flush=True)
 
         vanilla, rsr_final = df_first_last(rsr_df)
         _, mlm_final = df_first_last(base_df)
         print_table2(vanilla, rsr_final, mlm_final)
-        print(f"\nSaved per-step histories to: results/bert_continued_*_{ts}.csv", flush=True)
+        print(f"\nSaved per-step histories to: results/bert_continued_*{suffix}_{ts}.csv",
+              flush=True)
     else:
         df = train(cfg, args.regime, save_tag=args.save_tag)
-        out = RESULTS_DIR / f"bert_continued_{args.regime}_{ts}.csv"
+        suffix = f"_{args.save_tag}" if args.save_tag else ""
+        out = RESULTS_DIR / f"bert_continued_{args.regime}{suffix}_{ts}.csv"
         df.to_csv(out, index=False)
         print(f"\nSaved training history to: {out}", flush=True)
         if len(df) >= 2:

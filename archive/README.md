@@ -17,9 +17,8 @@ back and old approaches re-examined.
   - `seed_results_interleaved_sweep.xlsx` — stale results.
   - `Mark.txt` — **reference, not throwaway:** Mark Ormerod's RSR thesis
     chapter (Ch. 7). The methodological foundation for the new BERT
-    continued-pre-training work; cited in
-    `docs/bert_continued_pretraining_rsr_design.md`. (A copy also sits at repo
-    root.)
+    continued-pre-training work; the foundation for
+    `experiments/contextual_finetune/bert_rsr_continued_pretraining.py`.
 - **notebooks/** — early exploratory notebooks (`gpt2`, `interleave`, `main`,
   `testing`).
 - **brain_chapter/** — **reference, not throwaway:** Mark Ormerod's three
