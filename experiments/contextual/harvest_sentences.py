@@ -1,5 +1,5 @@
 """
-Stage A — Sentence harvester.
+Stage A, Sentence harvester.
 
 Goal: for every retained target word/MWE in our supervision+evaluation pool,
 collect up to MAX_OCCURRENCES sentences containing the target, drawn from
@@ -104,8 +104,8 @@ def load_target_inventory() -> tuple[set[str], set[str]]:
     print(f"Inventory:", flush=True)
     print(f"  AllCombined targets: {len(allcombined_targets)}", flush=True)
     print(f"  of which need enwiki fallback (THINGS): {len(enwiki_fallback_targets)}", flush=True)
-    print(f"  dropped — sense suffix: {dropped['sense_suffix']}", flush=True)
-    print(f"  dropped — below floor: {dropped['below_floor']}", flush=True)
+    print(f"  dropped, sense suffix: {dropped['sense_suffix']}", flush=True)
+    print(f"  dropped, below floor: {dropped['below_floor']}", flush=True)
     return allcombined_targets, enwiki_fallback_targets
 
 
@@ -186,7 +186,7 @@ def harvest_allcombined(targets: set[str]) -> dict[str, list[dict]]:
                             saturated.add(t)
                 # Early exit: if every target has saturated, stop scanning the corpus.
                 if len(saturated) == len(targets):
-                    print("All targets saturated — early exit.", flush=True)
+                    print("All targets saturated, early exit.", flush=True)
                     break
 
             if line_count % 200_000 == 0:
@@ -274,7 +274,7 @@ def harvest_enwiki(
     t0 = time.time()
     for idx, fpath in enumerate(remaining, start=1):
         if len(saturated) == len(targets):
-            print("  all enwiki targets saturated — early exit.", flush=True)
+            print("  all enwiki targets saturated, early exit.", flush=True)
             break
         shard_t0 = time.time()
         f_articles = 0

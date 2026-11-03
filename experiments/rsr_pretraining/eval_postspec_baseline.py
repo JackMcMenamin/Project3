@@ -41,12 +41,11 @@ import torch.nn.functional as F
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bert_rsr_continued_pretraining as B
 
-# see eval_men_transfer.py: without this, words are embedded in the original
-# Simple English sentences rather than the strict pool, and nothing is
-# comparable to any current result
-B.SENTENCES_DIR = B.ARTIFACTS / "sentences_strict"
+# The pool the checkpoints were trained on. It is also the default; set it
+# explicitly so this script does not depend on that.
+B.paths.set_sentence_pool(B.ARTIFACTS / "sentences_strict")
 
-import eval_retrofit_baseline as R  # noqa: E402  (import after SENTENCES_DIR)
+import eval_retrofit_baseline as R  # noqa: E402  (import after the pool is set)
 
 ORDER = ["all", "both", "one", "neither"]
 K = 3               # the k that most favoured retrofitting in the baseline
@@ -117,7 +116,7 @@ def main() -> None:
 
     simlex_words = {w for p in simlex for w in p[:2]}
     have_sents = {w for w in supervised
-                  if (B.SENTENCES_DIR / f"{B.slugify(w)}.jsonl").exists()}
+                  if B.has_sentences(w)}
     words = sorted(simlex_words | have_sents)
     print(f"SimLex pairs {len(simlex)}   supervised vocab {len(supervised)}")
     print("partitions: " + "  ".join(f"{k}={len(v)}" for k, v in sorted(cats.items())))

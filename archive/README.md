@@ -1,27 +1,15 @@
-# archive/ — superseded material (kept for provenance)
+# archive
 
-Nothing here is part of the current pipeline. Kept so results can be traced
-back and old approaches re-examined.
+Superseded code, kept so older results in `notes/findings.md` can be traced
+back. Nothing here is part of the current pipeline.
 
-- **transformers_word/** — **legacy** word-level transformer RSR (`run_seeds.py
-  --model bert|gpt2`). Superseded by the sentence-level
-  / continued-pre-training direction. Still runnable; kept as a comparison
-  point. See its own README.
-- **old_scripts/**
-  - `run_bert_seeds.py`, `run_gpt2_seeds.py` — the original near-duplicate
-    word-level runners, consolidated into `transformers_word/run_seeds.py`.
-  - `BERT.py`, `GPT2.py` — earlier single-file versions the seed scripts were
-    factored out of.
-  - `run_seeds_*.py` (`distill`, `distill_v2`, `men`, `multi`, `propagate`,
-    `run_seeds.py`) — exploratory RSR variants that were dropped.
-  - `seed_results_interleaved_sweep.xlsx` — stale results.
-  - `Mark.txt` — **reference, not throwaway:** Mark Ormerod's RSR thesis
-    chapter (Ch. 7). The methodological foundation for the new BERT
-    continued-pre-training work; the foundation for
-    `experiments/rsr_pretraining/bert_rsr_continued_pretraining.py`.
-- **notebooks/** — early exploratory notebooks (`gpt2`, `interleave`, `main`,
-  `testing`).
-- **brain_chapter/** — **reference, not throwaway:** Mark Ormerod's three
-  analysis notebooks for the RSR/brain chapter. Source of the layer-freezing
-  scheme (`embeddings + encoder.layer[:11]` frozen) and hyperparameters reused
-  in the design note.
+- `transformers_word/` is the word-level transformer RSR, where each word is
+  encoded on its own and only a projection head trains. It was the first
+  BERT/GPT-2 result and was replaced by continued pre-training. Its shared
+  library is `transformers_word/rsr/`.
+- `old_scripts/` holds the near-duplicate runners that `transformers_word`
+  consolidated, the single-file `BERT.py` and `GPT2.py` they came from, a set of
+  exploratory variants (distillation, propagation, multi-dataset, MEN), and the
+  multi-layer comparison runner whose flags were removed from the main script.
+  The removed options are still available at the `layer-experiments` tag.
+- `notebooks/` are early exploratory notebooks, outputs stripped.

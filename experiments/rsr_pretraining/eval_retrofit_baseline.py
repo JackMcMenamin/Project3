@@ -42,9 +42,9 @@ from scipy.stats import spearmanr
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bert_rsr_continued_pretraining as B
 
-# see eval_men_transfer.py: without this, words are embedded in the original
-# Simple English sentences rather than the strict pool
-B.SENTENCES_DIR = B.ARTIFACTS / "sentences_strict"
+# The pool the checkpoints were trained on. It is also the default; set it
+# explicitly so this script does not depend on that.
+B.paths.set_sentence_pool(B.ARTIFACTS / "sentences_strict")
 
 KS = [3, 5, 10, 20]
 ITERS = 10
@@ -129,7 +129,7 @@ def main() -> None:
     # embed the SimLex words plus every supervised word we have sentences for,
     # so the retrofitting graph is the full one rather than a SimLex slice
     have_sents = {w for w in supervised
-                  if (B.SENTENCES_DIR / f"{B.slugify(w)}.jsonl").exists()}
+                  if B.has_sentences(w)}
     words = sorted(simlex_words | have_sents)
     print(f"SimLex pairs {len(simlex)}   supervised vocab {len(supervised)}")
     print("partitions: " + "  ".join(f"{k}={len(v)}" for k, v in sorted(cats.items())))

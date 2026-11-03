@@ -1,87 +1,40 @@
-"""RSR on GPT-2: the same recipe, applied to a causal model.
+"""RSR on GPT-2: the BERT recipe applied to a causal model.
 
-Everything in the project so far is one architecture, which is the largest
-remaining limitation. This asks whether the central result -- RSR improves the
-pairs it was never supervised on, and not the ones it was -- survives a model
-that is autoregressive rather than masked.
+Supervision, partition, sentence pool and loss come from rsr_core, the same
+code the BERT script uses, so the two cannot drift apart. The recipe is
+lambda 0.7, 24 words per RSR batch, lr 5e-5, 2,000 steps, at least 8 scored
+pairs per batch, mean pooling over a word's sub-word tokens.
 
-WHAT IS HELD CONSTANT, so the numbers are comparable to the BERT ones
--------------------------------------------------------------------
-Deliberately imported from the BERT script rather than reimplemented, so there
-is no chance of them drifting apart:
+What has to change for GPT-2:
 
-  * supervision      SimVerb-3500 + THINGS, 2,652 words, MEN excluded
-  * evaluation       held-out SimLex-999, split Both / One / Neither by how much
-                     of each pair the supervision touched
-  * sentence pool    artifacts/sentences_strict (pass --sentences-dir)
-  * the loss itself  B._pair_loss: cosine for every scored pair in the batch,
-                     then 1 - soft_spearman against the human ordering
-  * pooling          mean over the target word's sub-word tokens, matching BERT
-  * hyperparameters  lambda 0.7, 24 words per RSR batch, lr 5e-5, 2000 steps,
-                     eval every 100, min 8 scored pairs per batch
+1. The anchor is causal language modelling, GPT-2's own pre-training loss, in
+   place of MLM: loss = (1 - lambda) * CLM + lambda * RSR.
+2. Attention is causal, so a word's vector sees only the tokens before it. A
+   word early in a sentence is much less contextualised than a late one.
+3. Byte-level BPE makes the leading space part of the token, so " cat" and
+   "cat" differ. Span finding tries the space-prefixed form first.
+4. GPT-2 is cased and bert-base-uncased is not. Capitalised forms are tried
+   when locating a word, but the difference remains.
 
-WHAT NECESSARILY CHANGES
-------------------------
-1. The anchor objective. BERT is anchored by masked language modelling; GPT-2
-   has no such objective, so the anchor is its own pretraining loss, causal
-   language modelling. The recipe is unchanged in form:
-       loss = (1 - lambda) * CLM + lambda * RSR
-   Substituting the model's own pretraining objective is the minimal defensible
-   change: in both cases the anchor is "keep being the language model you were".
-
-2. Attention is causal. A BERT vector for a word sees the whole sentence; a
-   GPT-2 vector for a word sees only the tokens up to and including it. So the
-   representation is built from left context alone, and a word early in a
-   sentence is far less contextualised than a late one. Nothing here corrects
-   for that. It is a real difference between the architectures rather than a
-   flaw in the setup, and it is one candidate explanation if the result does not
-   transfer.
-
-3. Tokenisation. GPT-2 uses byte-level BPE where a leading space is part of the
-   token, so " cat" and "cat" are different tokens. Span finding tries the
-   space-prefixed form first (the mid-sentence case) and falls back.
-
-4. Casing. bert-base-uncased lowercases everything; GPT-2 is cased. Capitalised
-   variants are tried when locating a word, but this remains a genuine
-   difference between the two settings and should be stated as such rather than
-   waved away.
-
-READ THIS BEFORE CHOOSING A LAYER
----------------------------------
-GPT-2's final layer is specialised for next-token prediction and is unusually
-anisotropic (Ethayarajh, 2019). That is not a
-theoretical worry here. The full probe, all 999 SimLex pairs, 20 sentences per
-word (results/gpt2_layer_probe_20260908_005631.csv):
+The read-out layer. GPT-2's last layer is strongly anisotropic (Ethayarajh,
+2019). Probe of untouched GPT-2 on all 999 SimLex pairs, 20 sentences per word
+(results/gpt2_layer_probe_20260908_005631.csv):
 
     layer      all   neither    mean cos    sd cos
         0    0.412     0.405       0.721     0.063
-        6    0.529     0.540       0.749     0.083   <- best
+        6    0.529     0.540       0.749     0.083
         7    0.526     0.543       0.760     0.083
        11    0.412     0.453       0.897     0.041
-       12    0.161     0.180       0.994     0.006   <- the default
+       12    0.161     0.180       0.994     0.006
 
-By layer 12 every cosine sits at 0.994 +/- 0.006: the space has collapsed to a
-needle and can barely express an ordering, and all-pairs falls to 0.161 against
-0.529 six layers below. For comparison, BERT's layer 12 reads 0.480 on the same
-pairs, so BERT's final layer is a serviceable lexical read-out and GPT-2's is
-not. "Read from the last layer" therefore matches the layer NUMBER across the
-two models while mismatching what that layer does.
+At layer 12 every cosine is 0.994 +/- 0.006, so the space can barely express
+an ordering. BERT's layer 12 reads 0.480 on the same pairs. The reported runs
+read out at layer 6. The default is still the last layer so nothing differs
+from BERT silently; pass --rsr-layer.
 
-The default here is still the last layer, deliberately, so nothing is silently
-changed relative to the BERT recipe. Pass --rsr-layer explicitly. Note that the
-BERT experiments established that the best-probing layer is NOT the best layer
-to attach RSR to (layer 7 read better than 12 but gained less, +0.027 against
-+0.053), so layer 6 should not simply be assumed correct either. Run both.
-
-Usage:
-    # which layer of untouched GPT-2 is already best at SimLex?
+    python experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py --probe-layers
     python experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py \
-        --probe-layers --sentences-dir artifacts/sentences_strict
-
-    # the main comparison: matched CLM control against RSR
-    python experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py \
-        --regime compare --lambda 0.7 --seed 1 \
-        --sentences-dir artifacts/sentences_strict
+        --regime compare --lambda 0.7 --rsr-layer 6 --seed 1
 """
 from __future__ import annotations
 
@@ -90,8 +43,7 @@ import os
 import random
 import sys
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from itertools import combinations
 
@@ -104,13 +56,19 @@ from scipy.stats import spearmanr
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bert_rsr_continued_pretraining as B
+from rsr_core import paths
+from rsr_core.data import (RSR_TEMPLATE, find_subword_span, has_sentences,
+                           load_sentences_for, load_simlex, load_supervision,
+                           partition, set_seed)
+from rsr_core.loss import pair_loss
+from rsr_core.paths import RESULTS_DIR
+from rsr_core.report import score_partitions
 
-DEVICE = B.DEVICE
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # ============================================================================
-# Config. Mirrors B.Config field for field where the two overlap, so the two
+# Config. Mirrors the BERT Config field for field where the two overlap, so the two
 # recipes can be diffed by eye and any divergence is visible.
 # ============================================================================
 @dataclass
@@ -126,7 +84,6 @@ class Config:
     steps: int = 2000
     eval_every: int = 100
     seed: int = 1
-    projection_dim: int = 0         # 0 = loss acts on the raw 768-d states
     # Hidden layer the RSR target vectors are read from. None = last layer, to
     # match BERT's default. hidden_states is a 13-tuple: [0] embeddings,
     # [1..12] each transformer block.
@@ -140,6 +97,14 @@ class Config:
     early_stop: bool = True
     early_stop_metric: str = "all"
     use_men: bool = False
+    # Context the RSR target words are embedded in during training. Same two
+    # options as the BERT script: real harvested sentences, or the fixed null
+    # frame RSR_TEMPLATE, which makes every word's vector deterministic.
+    rsr_context: str = "sentences"
+    # Contexts to score SimLex in. The FIRST is primary: it drives early
+    # stopping and keeps the unprefixed CSV columns; extra contexts get a
+    # prefix, so one run yields one curve per context.
+    eval_contexts: tuple = ("sentences",)
 
 
 # ============================================================================
@@ -160,7 +125,7 @@ def find_word_span(tokenizer, sent_ids: list[int], word: str) -> tuple[int, int]
     """First occurrence of `word` in an already-tokenised sentence, or None."""
     for variant in gpt2_word_variants(word):
         ids = tokenizer(variant, add_special_tokens=False)["input_ids"]
-        span = B.find_subword_span(sent_ids, ids)
+        span = find_subword_span(sent_ids, ids)
         if span is not None:
             return span
     return None
@@ -179,11 +144,6 @@ class GPT2RSR(nn.Module):
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.lm = GPT2LMHeadModel.from_pretrained(cfg.model_name)
         self.lm.config.pad_token_id = self.tokenizer.pad_token_id
-        hidden = self.lm.config.n_embd
-        self.projection = (
-            nn.Linear(hidden, cfg.projection_dim) if cfg.projection_dim > 0
-            else nn.Identity()
-        )
         self.to(DEVICE)
 
     # ---- (a) the anchor: causal language modelling ------------------------
@@ -218,14 +178,14 @@ class GPT2RSR(nn.Module):
                 vecs.append(hidden[j, end - 1])
             else:
                 vecs.append(hidden[j, start:end].mean(dim=0))
-        return self.projection(torch.stack(vecs))
+        return torch.stack(vecs)
 
 
 # ============================================================================
 # Anchor batches: plain causal LM over the same sentence pool
 # ============================================================================
 class CLMBatcher:
-    """The counterpart of B.MLMBatcher. No masking is needed: the objective is
+    """The counterpart of the BERT MLMBatcher. No masking is needed: the objective is
     already next-token prediction, so the only bookkeeping is excluding padding
     from the loss."""
 
@@ -249,7 +209,7 @@ class CLMBatcher:
 # RSR batches: N target words, each in one of its real sentences
 # ============================================================================
 class RSRSampler:
-    """Mirrors B.RSRBatchSampler: sample N supervised words, put each in one of
+    """Mirrors the BERT RSRBatchSampler: sample N supervised words, put each in one of
     its harvested sentences, and keep the batch only if enough of its pairs have
     human ratings."""
 
@@ -262,7 +222,7 @@ class RSRSampler:
 
     def _sentences(self, word: str) -> list[str]:
         if word not in self._cache:
-            self._cache[word] = B.load_sentences_for(word)
+            self._cache[word] = load_sentences_for(word)
         return self._cache[word]
 
     def sample_batch(self):
@@ -274,11 +234,16 @@ class RSRSampler:
         for word in pool:
             if len(words) == N:
                 break
-            cand = self._sentences(word)
-            if not cand:
-                continue
-            cand = list(cand)
-            random.shuffle(cand)
+            if self.cfg.rsr_context == "template":
+                # one fixed null context, so the word's vector carries no
+                # context noise (the original rsr_all arm)
+                cand = [RSR_TEMPLATE.format(word=word)]
+            else:
+                cand = self._sentences(word)
+                if not cand:
+                    continue
+                cand = list(cand)
+                random.shuffle(cand)
             for sent in cand[:8]:
                 ids = self.tokenizer(sent, truncation=True,
                                      max_length=self.cfg.max_seq_len)["input_ids"]
@@ -301,25 +266,33 @@ class RSRSampler:
 def rsr_loss_for_batch(model: GPT2RSR, batch, spans, words, sim_lookup, cfg):
     vecs = model.target_vectors(batch["input_ids"].to(DEVICE),
                                 batch["attention_mask"].to(DEVICE), spans)
-    # B._pair_loss is the same soft-Spearman objective the BERT runs use. Reused
-    # rather than reimplemented so the two architectures cannot silently end up
-    # optimising slightly different things.
-    return B._pair_loss(vecs, words, sim_lookup, cfg)
+    return pair_loss(vecs, words, sim_lookup,
+                     cfg.min_pairs_per_rsr_batch, cfg.soft_rank_strength)
 
 
 # ============================================================================
 # Evaluation: identical partitioning to BERT, GPT-2 embedding
 # ============================================================================
 def embed_words(model: GPT2RSR, words: list[str], cfg: Config,
-                cache: dict[str, list[str]], max_sents: int = 20) -> dict[str, torch.Tensor]:
+                cache: dict[str, list[str]], max_sents: int = 20,
+                context: str = "sentences") -> dict[str, torch.Tensor]:
+    """`context` picks what the word is embedded in, as in the BERT script:
+    "sentences" (up to max_sents harvested sentences, averaged), "bare" (the
+    word alone), or "template" (RSR_TEMPLATE)."""
     model.eval()
     out: dict[str, torch.Tensor] = {}
     with torch.no_grad():
         for w in words:
-            if w not in cache:
-                cache[w] = B.load_sentences_for(w)
+            if context == "bare":
+                sents = [w]
+            elif context == "template":
+                sents = [RSR_TEMPLATE.format(word=w)]
+            else:
+                if w not in cache:
+                    cache[w] = load_sentences_for(w)
+                sents = cache[w][:max_sents]
             vecs = []
-            for sent in cache[w][:max_sents]:
+            for sent in sents:
                 enc = model.tokenizer(sent, truncation=True,
                                       max_length=cfg.max_seq_len, return_tensors="pt")
                 span = find_word_span(model.tokenizer,
@@ -334,62 +307,19 @@ def embed_words(model: GPT2RSR, words: list[str], cfg: Config,
     return out
 
 
-def evaluate_simlex(model: GPT2RSR, simlex, supervised_vocab, cfg, cache) -> dict:
-    """Same three-way split as the BERT evaluation: for each held-out SimLex
-    pair, how many of its two words appeared anywhere in the supervision.
-    'neither' is the generalisation test."""
-    cats = defaultdict(list)
-    for w1, w2, s in simlex:
-        in1, in2 = w1 in supervised_vocab, w2 in supervised_vocab
-        cat = "both" if (in1 and in2) else ("one" if (in1 or in2) else "neither")
-        cats["all"].append((w1, w2, s))
-        cats[cat].append((w1, w2, s))
-
-    results = {}
-    for name, pairs in cats.items():
-        words = list({w for p in pairs for w in p[:2]})
-        emb = embed_words(model, words, cfg, cache)
-        model_s, human_s = [], []
-        for w1, w2, s in pairs:
-            if w1 in emb and w2 in emb:
-                model_s.append(F.cosine_similarity(emb[w1].unsqueeze(0),
-                                                   emb[w2].unsqueeze(0)).item())
-                human_s.append(s)
-        if len(model_s) < 2:
-            results[name] = {"n": len(model_s), "rho": float("nan")}
-        else:
-            rho, _ = spearmanr(human_s, model_s)
-            results[name] = {"n": len(model_s), "rho": float(rho)}
-    return results
-
-
-def partition(pairs, supervised_vocab):
-    """Split any pair list by how much of each pair the supervision touched."""
-    cats = defaultdict(list)
-    for w1, w2, sc in pairs:
-        in1, in2 = w1 in supervised_vocab, w2 in supervised_vocab
-        cat = "both" if (in1 and in2) else ("one" if (in1 or in2) else "neither")
-        cats["all"].append((w1, w2, sc))
-        cats[cat].append((w1, w2, sc))
-    return cats
+def evaluate_simlex(model: GPT2RSR, simlex, supervised_vocab, cfg, cache,
+                    context: str = "sentences") -> dict:
+    """Same three-way split as the BERT evaluation. Every word is embedded once
+    and shared across partitions."""
+    words = list({w for p in simlex for w in p[:2]})
+    emb = embed_words(model, words, cfg, cache, context=context)
+    return score_partitions(emb, partition(simlex, supervised_vocab))
 
 
 def score_pairs(model, cats, cfg, cache) -> dict:
-    """Spearman per partition, embedding the union once."""
+    """Spearman per partition for any pair set, embedding the union once."""
     words = list({w for p in cats["all"] for w in p[:2]})
-    emb = embed_words(model, words, cfg, cache)
-    out = {}
-    for name, pairs in cats.items():
-        ms, hs = [], []
-        for w1, w2, h in pairs:
-            if w1 in emb and w2 in emb:
-                ms.append(F.cosine_similarity(emb[w1].unsqueeze(0),
-                                              emb[w2].unsqueeze(0)).item())
-                hs.append(h)
-        out[name] = {"n": len(ms),
-                     "rho": float(spearmanr(hs, ms).correlation) if len(ms) > 10
-                            else float("nan")}
-    return out
+    return score_partitions(embed_words(model, words, cfg, cache), cats, min_n=11)
 
 
 def evaluate_men(model, supervised_vocab, cfg, cache) -> dict:
@@ -408,27 +338,27 @@ def evaluate_men(model, supervised_vocab, cfg, cache) -> dict:
 # Layer probe: which layer of untouched GPT-2 is already best at SimLex?
 # ============================================================================
 def probe_layers(cfg: Config, max_sents: int = 20) -> pd.DataFrame:
-    """The GPT-2 counterpart of B.probe_layers. Worth running before choosing a
+    """The GPT-2 counterpart of the BERT probe_layers. Worth running before choosing a
     read-out: GPT-2's last layer is heavily specialised for next-token
     prediction, so inheriting BERT's layer 12 without checking would be an
     assumption rather than a decision."""
     print("Layer probe: untouched GPT-2, no training, "
           f"{max_sents} sentences/word", flush=True)
-    simlex = B.load_simlex()
-    _, supervised = B.load_supervision(use_men=cfg.use_men)
+    simlex = load_simlex()
+    _, supervised = load_supervision(use_men=cfg.use_men)
     model = GPT2RSR(cfg)
     model.eval()
     NL = model.lm.config.n_layer
 
     # One forward per sentence with output_hidden_states gives every layer at
     # once, so the whole 13-layer curve costs about one evaluation rather than
-    # thirteen. Same trick as B.probe_layers.
+    # thirteen.
     words = sorted({w for p in simlex for w in p[:2]})
     per_layer: dict[int, dict[str, torch.Tensor]] = {L: {} for L in range(NL + 1)}
     with torch.no_grad():
         for i, w in enumerate(words):
             acc = {L: [] for L in range(NL + 1)}
-            for sent in B.load_sentences_for(w)[:max_sents]:
+            for sent in load_sentences_for(w)[:max_sents]:
                 enc = model.tokenizer(sent, truncation=True,
                                       max_length=cfg.max_seq_len, return_tensors="pt")
                 span = find_word_span(model.tokenizer, enc["input_ids"][0].tolist(), w)
@@ -448,12 +378,7 @@ def probe_layers(cfg: Config, max_sents: int = 20) -> pd.DataFrame:
             if (i + 1) % 200 == 0:
                 print(f"  embedded {i+1}/{len(words)} words", flush=True)
 
-    cats = defaultdict(list)
-    for w1, w2, s in simlex:
-        in1, in2 = w1 in supervised, w2 in supervised
-        cat = "both" if (in1 and in2) else ("one" if (in1 or in2) else "neither")
-        cats["all"].append((w1, w2, s))
-        cats[cat].append((w1, w2, s))
+    cats = partition(simlex, supervised)
 
     rows = []
     print(f"\n{'layer':>6}{'all':>9}{'both':>9}{'one':>9}{'neither':>9}"
@@ -504,13 +429,23 @@ def train(cfg: Config, regime: str, shared: dict, verbose: bool = True,
 
     cache: dict[str, list[str]] = {}
     history = []
-    res = evaluate_simlex(model, shared["simlex"], shared["supervised"], cfg, cache)
+    contexts = tuple(cfg.eval_contexts) or ("sentences",)
+    by_ctx = {c: evaluate_simlex(model, shared["simlex"], shared["supervised"],
+                                 cfg, cache, context=c) for c in contexts}
+    res = by_ctx[contexts[0]]          # primary context drives early stopping
     if verbose:
         print("\nBaseline evaluation (before any training):", flush=True)
-        print(f"  [step 0] all={res['all']['rho']:.4f} (n={res['all']['n']})  "
-              f"both={res['both']['rho']:.4f}  one={res['one']['rho']:.4f}  "
-              f"neither={res['neither']['rho']:.4f}", flush=True)
-    history.append({"step": 0, **{f"{k}_{m}": res[k][m] for k in res for m in res[k]}})
+        for c in contexts:
+            r = by_ctx[c]
+            tag = "step 0" if c == contexts[0] else f"step 0 {c}"
+            print(f"  [{tag}] all={r['all']['rho']:.4f} (n={r['all']['n']})  "
+                  f"both={r['both']['rho']:.4f}  one={r['one']['rho']:.4f}  "
+                  f"neither={r['neither']['rho']:.4f}", flush=True)
+    row0 = {"step": 0}
+    for c, r in by_ctx.items():
+        pre = "" if c == contexts[0] else c + "_"
+        row0.update({f"{pre}{k}_{m}": r[k][m] for k in r for m in r[k]})
+    history.append(row0)
     # MEN is scored once before and once after. It is a second full embedding
     # pass, too costly to run per step, and only the endpoints are needed.
     men0 = evaluate_men(model, shared["supervised"], cfg, cache)
@@ -551,15 +486,23 @@ def train(cfg: Config, regime: str, shared: dict, verbose: bool = True,
 
         if step % cfg.eval_every == 0:
             clm_avg, rsr_avg = run_clm / max(n_clm, 1), run_rsr / max(n_rsr, 1)
-            res = evaluate_simlex(model, shared["simlex"], shared["supervised"], cfg, cache)
+            by_ctx = {c: evaluate_simlex(model, shared["simlex"], shared["supervised"],
+                                         cfg, cache, context=c) for c in contexts}
+            res = by_ctx[contexts[0]]
             if verbose:
                 print(f"step {step}/{cfg.steps}  clm_loss={clm_avg:.4f}  "
                       f"rsr_loss={rsr_avg:.4f}  ({time.time()-t0:.0f}s)", flush=True)
-                print(f"  [step {step}] all={res['all']['rho']:.4f}  "
-                      f"both={res['both']['rho']:.4f}  one={res['one']['rho']:.4f}  "
-                      f"neither={res['neither']['rho']:.4f}", flush=True)
-            history.append({"step": step, "clm_loss": clm_avg, "rsr_loss": rsr_avg,
-                            **{f"{k}_{m}": res[k][m] for k in res for m in res[k]}})
+                for c in contexts:
+                    r = by_ctx[c]
+                    tag = f"step {step}" if c == contexts[0] else f"step {step} {c}"
+                    print(f"  [{tag}] all={r['all']['rho']:.4f}  "
+                          f"both={r['both']['rho']:.4f}  one={r['one']['rho']:.4f}  "
+                          f"neither={r['neither']['rho']:.4f}", flush=True)
+            row = {"step": step, "clm_loss": clm_avg, "rsr_loss": rsr_avg}
+            for c, r in by_ctx.items():
+                pre = "" if c == contexts[0] else c + "_"
+                row.update({f"{pre}{k}_{m}": r[k][m] for k in r for m in r[k]})
+            history.append(row)
             # Flush every eval: a run killed partway leaves usable curves rather
             # than nothing. Two power-offs during the BERT runs taught this.
             if partial_path is not None:
@@ -593,22 +536,21 @@ def train(cfg: Config, regime: str, shared: dict, verbose: bool = True,
 
 
 def load_shared(cfg: Config) -> dict:
-    """All data comes from the BERT module, so both architectures are trained
-    and scored on exactly the same inputs."""
-    simlex = B.load_simlex()
-    sim_lookup, supervised = B.load_supervision(use_men=cfg.use_men)
-    targets = sorted(w for w in supervised
-                     if (B.SENTENCES_DIR / f"{B.slugify(w)}.jsonl").exists())
+    """The same inputs the BERT script uses. The caller seeds `random` first,
+    so the anchor corpus is reproducible."""
+    simlex = load_simlex()
+    sim_lookup, supervised = load_supervision(use_men=cfg.use_men)
+    targets = sorted(w for w in supervised if has_sentences(w))
     print(f"  supervised vocab: {len(supervised)} | SimLex pairs: {len(simlex)}", flush=True)
     print(f"  usable RSR targets (supervised + have sentences): {len(targets)}", flush=True)
 
-    # The anchor corpus, built exactly as B.Shared builds it: sentences harvested
+    # The anchor corpus, built as the BERT Shared builds it: sentences harvested
     # for 400 randomly chosen target words. Same construction, same size, so the
     # two architectures see the same kind of text.
     print("Loading anchor sentence pool ...", flush=True)
     mlm_sentences = []
     for w in random.sample(targets, k=min(400, len(targets))):
-        mlm_sentences.extend(B.load_sentences_for(w))
+        mlm_sentences.extend(load_sentences_for(w))
     print(f"  anchor sentences: {len(mlm_sentences)}", flush=True)
 
     return {"simlex": simlex, "sim_lookup": sim_lookup, "supervised": supervised,
@@ -635,19 +577,24 @@ def main() -> None:
                          "that has seen the whole word")
     ap.add_argument("--model-name", default=None, help="default gpt2 (12 layers, 768d)")
     ap.add_argument("--no-early-stop", action="store_true")
+    ap.add_argument("--rsr-context", choices=["sentences", "template"], default=None,
+                    help="embed RSR target words in real sentences (default) or in "
+                         "the fixed null frame used by the original rsr_all arm")
+    ap.add_argument("--eval-contexts", type=str, default=None,
+                    help="comma-separated contexts to score SimLex in, e.g. "
+                         "sentences,bare,template; the first drives early stopping "
+                         "and keeps the unprefixed CSV columns")
     ap.add_argument("--probe-layers", action="store_true")
     ap.add_argument("--sentences-dir", default=None,
-                    help="sentence pool. The default is the SIMPLE ENGLISH corpus; "
-                         "pass artifacts/sentences_strict to match every current result")
+                    help="sentence pool relative to the repo root "
+                         "(default artifacts/sentences_strict)")
     ap.add_argument("--save-tag", default=None)
     args = ap.parse_args()
 
     if args.sentences_dir:
-        B.SENTENCES_DIR = B.REPO_ROOT / args.sentences_dir
-        if not B.SENTENCES_DIR.is_dir():
-            raise SystemExit(f"no such sentence pool: {B.SENTENCES_DIR}")
-        n = sum(1 for _ in B.SENTENCES_DIR.glob("*.jsonl"))
-        print(f"Sentence pool: {B.SENTENCES_DIR}  ({n} target files)", flush=True)
+        paths.set_sentence_pool(args.sentences_dir)
+    pool = paths.sentence_pool()
+    print(f"Sentence pool: {pool} ({sum(1 for _ in pool.glob('*.jsonl'))} files)", flush=True)
 
     cfg = Config()
     for flag, attr in [("rsr_lambda", "rsr_lambda"), ("steps", "steps"),
@@ -661,17 +608,22 @@ def main() -> None:
         cfg.learning_rate = args.lr
     if args.no_early_stop:
         cfg.early_stop = False
+    if args.rsr_context:
+        cfg.rsr_context = args.rsr_context
+    if args.eval_contexts:
+        cfg.eval_contexts = tuple(c.strip() for c in args.eval_contexts.split(",") if c.strip())
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     tag = args.save_tag or "gpt2"
 
     if args.probe_layers:
         df = probe_layers(cfg)
-        out = B.RESULTS_DIR / f"gpt2_layer_probe_{stamp}.csv"
+        out = RESULTS_DIR / f"gpt2_layer_probe_{stamp}.csv"
         df.to_csv(out, index=False)
         print(f"\nSaved -> {out}")
         return
 
+    set_seed(cfg.seed)
     shared = load_shared(cfg)
     frames = {}
     for regime in (["baseline", "rsr"] if args.regime == "compare" else [args.regime]):
@@ -679,8 +631,8 @@ def main() -> None:
               f"(lambda={cfg.rsr_lambda}) ##########", flush=True)
         frames[regime] = train(
             cfg, regime, shared,
-            partial_path=B.RESULTS_DIR / f"partial_gpt2_{regime}_{tag}.csv")
-        out = B.RESULTS_DIR / f"gpt2_continued_{regime}_{tag}_{stamp}.csv"
+            partial_path=RESULTS_DIR / f"partial_gpt2_{regime}_{tag}.csv")
+        out = RESULTS_DIR / f"gpt2_continued_{regime}_{tag}_{stamp}.csv"
         frames[regime].to_csv(out, index=False)
         print(f"Saved -> {out}", flush=True)
 

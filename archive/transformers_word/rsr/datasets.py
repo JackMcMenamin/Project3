@@ -8,7 +8,8 @@ Evaluation:
 
 `load_all_rsr_datasets()` returns the concatenated pair list, a small info
 dict, and the set of all words that appear anywhere in the supervision pool
-(`rsr_words`) — the latter drives the both/one/neither-in-RSR partition.
+(`rsr_words`), the latter drives the both/one/neither-in-RSR partition that
+the analysis reports.
 """
 from __future__ import annotations
 

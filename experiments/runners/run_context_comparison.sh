@@ -53,7 +53,7 @@ for seed in $SEEDS; do
     echo "=== seed $seed : sentences arm already complete, skipping ==="
   else
     echo "=== seed $seed : control + RSR on real sentences ==="
-    python "$SCRIPT" --regime compare --combine weighted --lambda 0.7 \
+    python "$SCRIPT" --regime compare --lambda 0.7 \
       --steps "$STEPS" --eval-every "$EVAL_EVERY" --seed "$seed" \
       --rsr-context sentences --eval-contexts "$CONTEXTS" --sentences-dir "$POOL" \
       --save-tag "$tag" \
@@ -66,7 +66,7 @@ for seed in $SEEDS; do
     echo "=== seed $seed : template arm already complete, skipping ==="
   else
     echo "=== seed $seed : RSR on templates ==="
-    python "$SCRIPT" --regime rsr --combine weighted --lambda 0.7 \
+    python "$SCRIPT" --regime rsr --lambda 0.7 \
       --steps "$STEPS" --eval-every "$EVAL_EVERY" --seed "$seed" \
       --rsr-context template --eval-contexts "$CONTEXTS" --sentences-dir "$POOL" \
       --save-tag "$tag" \

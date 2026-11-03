@@ -1,5 +1,5 @@
 """
-Word-level transformer RSR — multi-seed experiment (BERT or GPT-2).
+Word-level transformer RSR, multi-seed experiment (BERT or GPT-2).
 
 This is the ACTIVE word-level RSR experiment. Each word is encoded in
 isolation by a (mostly frozen) transformer, a small projection head is
@@ -9,7 +9,7 @@ supervision overlap.
 
 It replaces the old, near-identical `run_bert_seeds.py` and
 `run_gpt2_seeds.py` (now in `archive/old_scripts/`): the shared logic lives in
-`src/rsr/`, and the only per-architecture differences are the model wrapper
+`rsr/` next to this file, and the only per-architecture differences are the model wrapper
 (selected by `--model`) and the labels.
 
 Usage:
@@ -24,14 +24,14 @@ import sys
 from pathlib import Path
 
 # Make `import rsr` work no matter where this is launched from.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from rsr import datasets, reporting          # noqa: E402
 from rsr.models import DEVICE, WRAPPERS       # noqa: E402
 from rsr.losses import HAS_TORCHSORT          # noqa: E402
 from rsr.train_eval import run_single_seed    # noqa: E402
 
-# --- hyperparameters (the experimental contract — change deliberately) ------
+# --- hyperparameters (the experimental contract, change deliberately) ------
 RSR_EPOCHS = 200
 RSR_LR = 1e-3
 RSR_SAMPLE_SIZE = 10000

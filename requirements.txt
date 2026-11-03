@@ -1,0 +1,12 @@
+# Versions in the training environment as of November 2026 (Python 3.11, CUDA 12.8).
+# torchsort is deliberately absent: no run had it, so the loss used the
+# sigmoid soft rank in rsr_core/loss.py. Installing it changes the loss.
+torch==2.9.0
+transformers==4.54.1
+numpy==1.26.4
+pandas==2.3.1
+scipy==1.16.1
+scikit-learn==1.7.1
+tqdm==4.67.1
+matplotlib==3.10.5
+openpyxl==3.1.5

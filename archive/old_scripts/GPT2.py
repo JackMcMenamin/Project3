@@ -6,7 +6,7 @@ Fine-tunes pre-trained GPT-2 embeddings using combined RSR datasets
 
 Approach (adapted from BERT/Mark's implementation):
 1. Load pre-trained gpt2
-2. Add projection layer (768 → 128 dim)
+2. Add projection layer (768 -> 128 dim)
 3. Use CONTEXTUAL embeddings (full GPT-2 forward pass)
 4. Freeze embeddings + first N layers, only train last layers + projection
 5. Apply RSR loss (soft Spearman correlation) to align with human similarity

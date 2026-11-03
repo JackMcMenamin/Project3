@@ -21,7 +21,7 @@ DEFAULT_RANK_STRENGTH = 1.0
 
 
 def soft_rank_custom(x: torch.Tensor, regularization_strength: float = 1.0) -> torch.Tensor:
-    """Sigmoid-pairwise soft rank — fallback when torchsort is not installed."""
+    """Sigmoid-pairwise soft rank, fallback when torchsort is not installed."""
     if x.dim() == 1:
         x = x.unsqueeze(0)
     diff = x.unsqueeze(2) - x.unsqueeze(1)

@@ -1,27 +1,25 @@
-# Contextual / sentence-level RSR pipeline
+# Sentence pool and cached contextual vectors
 
-Newer line of work that addresses the "you used contextual models as static
-encoders" critique: instead of encoding each word in isolation, sample up to
-50 Wikipedia sentences per target, embed the target span in context, mean-pool
-its subwords, and average across occurrences → one cached 768-d vector per
-(model, target). That cached vector is used at **both** train and eval time.
+This folder builds the Wikipedia sentence pool every continued pre-training run
+uses: `harvest_sentences_strict.py`, then `filter_sentence_pool.py`, writing
+`artifacts/sentences_strict/<word>.jsonl`.
 
-## Stages (run in order)
+The other stages are the earlier cached-vector approach. Each target word was
+embedded in up to 50 sentences, pooled to one 768-d vector, cached, and a
+projection head was trained on the cache. They are kept because the notes
+report their results.
 
-| Stage | Script | What it does |
-|-------|--------|--------------|
-| 0a | `coverage_probe.py` | Count target occurrences in `data/AllCombined.txt` |
-| 0b | `enwiki_fallback_probe.py` | Chase below-floor THINGS targets through the enwiki dump |
-| A  | `harvest_sentences.py` | Harvest up to 50 sentences/target → `artifacts/sentences/<slug>.jsonl` (+ manifest). **Slow** (20+ min over enwiki) — don't rerun unless the target inventory or floor changes |
-| B  | `extract_contextual_vectors.py --model {bert,gpt2}` | Cache 768-d vectors → `artifacts/cache/{model}/vectors.npz` |
-| C  | `run_seeds_contextual.py --model {bert,gpt2}` | 10-seed RSR on cached vectors (transformer backbone not loaded; only the projection head trains) |
-| — | `run_full_contextual.py` | Driver: both models, 10 seeds, writes the summary |
-| — | `tune_lr_epochs.py` | lr / epoch sweep for the contextual setup |
+| Stage | Script | Purpose |
+|-------|--------|---------|
+| 0a | `coverage_probe.py` | count target occurrences in the corpus |
+| 0b | `enwiki_fallback_probe.py` | find rare THINGS targets in the full enwiki dump |
+| A | `harvest_sentences.py` | first harvest, Simple English pool (slow) |
+| A' | `harvest_sentences_strict.py`, `filter_sentence_pool.py` | full-Wikipedia pool used by all reported runs |
+| B | `extract_contextual_vectors.py --model {bert,gpt2}` | cache one vector per word |
+| C | `run_seeds_contextual.py --model {bert,gpt2}` | multi-seed RSR on the cached vectors |
+| | `run_full_contextual.py` | both models, ten seeds, summary table |
+| | `tune_lr_epochs.py` | learning-rate and epoch sweep |
+| | `audit_harvest_quality.py` | spot checks on harvested sentences |
 
 `run_full_contextual.py` and `tune_lr_epochs.py` import `run_seeds_contextual`
-as a sibling module, so launch them from this directory (or with this folder on
-the path).
-
-## Status note
-The headline results now come from continued pre-training in `../rsr_pretraining/`.
-This directory supplies the sentence pool (`harvest_sentences_strict.py`, then `filter_sentence_pool.py`); the cached-vector stages below are the earlier approach it grew out of and are kept for provenance.
+as a sibling, so run them from this folder.

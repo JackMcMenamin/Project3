@@ -1,5 +1,5 @@
 """
-rsr — shared library for the Representational Similarity Regularisation experiments.
+rsr, shared library for the Representational Similarity Regularisation experiments.
 
 This package holds the logic that used to be copy-pasted across the various
 `run_*_seeds.py` scripts: the soft-Spearman RSR loss, dataset loading

@@ -48,7 +48,7 @@ def run_combo(vectors, all_pairs, rsr_words, simlex, lr: float, epochs: int) -> 
 
 
 def main() -> None:
-    print(f"=== Hyperparameter sweep — {MODEL_NAME}, seed {SEED} ===", flush=True)
+    print(f"=== Hyperparameter sweep, {MODEL_NAME}, seed {SEED} ===", flush=True)
     print(f"LR grid:    {LR_GRID}", flush=True)
     print(f"Epoch grid: {EPOCH_GRID}", flush=True)
     print(f"Total combos: {len(LR_GRID) * len(EPOCH_GRID)}", flush=True)

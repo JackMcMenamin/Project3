@@ -1,5 +1,5 @@
 """
-Stage B — Contextual vector extraction.
+Stage B, Contextual vector extraction.
 
 For each target with cached sentences (from harvest_sentences.py), produce
 one 768-d contextual embedding per (model, target):
@@ -12,7 +12,7 @@ one 768-d contextual embedding per (model, target):
          c. Run the model, take the last hidden layer.
          d. Mean-pool over the target's subword positions.
        Skip the sentence on tokenisation mismatch.
-    3. Mean-average the per-sentence target vectors → one cached 768-d vector.
+    3. Mean-average the per-sentence target vectors -> one cached 768-d vector.
 
 Output:
     cache/{model}/vectors.npz       one array per target (keyed by slug)

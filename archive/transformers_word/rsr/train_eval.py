@@ -3,7 +3,7 @@ RSR training, SimLex evaluation, and the single-seed driver shared by the
 word-level transformer experiments (BERT, GPT-2).
 
 The evaluation partitions SimLex-999 by how many of each pair's words appear
-in the RSR supervision vocabulary (both / one / neither in RSR) — this is the
+in the RSR supervision vocabulary (both / one / neither in RSR), this is the
 generalisation analysis.
 """
 from __future__ import annotations

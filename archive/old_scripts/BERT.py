@@ -6,7 +6,7 @@ Fine-tunes pre-trained BERT embeddings using combined RSR datasets
 
 Approach (following Mark's implementation):
 1. Load pre-trained bert-base-uncased
-2. Add projection layer (768 → 128 dim) like Mark did
+2. Add projection layer (768 -> 128 dim) like Mark did
 3. Use CONTEXTUAL embeddings (full BERT forward pass, not just word_embeddings)
 4. Freeze embeddings + first 11 layers, only train last layer + projection
 5. Apply RSR loss (soft Spearman correlation) to align with human similarity

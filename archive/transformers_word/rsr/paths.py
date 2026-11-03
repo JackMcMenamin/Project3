@@ -1,17 +1,15 @@
 """
 Single source of truth for every on-disk path the experiments use.
 
-Everything is resolved relative to the repository root (the directory that
-contains this `src/` folder), so scripts work no matter what the current
-working directory is. This replaces the old bare `Path("data")` /
-`Path("SimLex-999")` references that only worked when run from the repo root.
+Everything is resolved relative to the repository root, so scripts work from
+any working directory.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-# src/rsr/paths.py  ->  repo root is two parents up from this file.
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# archive/transformers_word/rsr/paths.py, so the repo root is three levels up.
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # --- top-level dirs ---------------------------------------------------------
 DATA_DIR = REPO_ROOT / "data"

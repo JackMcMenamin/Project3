@@ -33,7 +33,7 @@ SEEDS = list(range(1, 11))
 
 def run_one_model(model_name: str, timestamp: str) -> tuple[pd.DataFrame, dict]:
     print("\n" + "=" * 70, flush=True)
-    print(f" {model_name.upper()} — 10 seeds, lr={LR}, epochs={EPOCHS}", flush=True)
+    print(f" {model_name.upper()}, 10 seeds, lr={LR}, epochs={EPOCHS}", flush=True)
     print("=" * 70, flush=True)
 
     # Patch module constants so run_single_seed picks them up.
@@ -102,18 +102,18 @@ def run_one_model(model_name: str, timestamp: str) -> tuple[pd.DataFrame, dict]:
 
 
 def write_summary(bert_summary: dict, gpt2_summary: dict, path: Path) -> None:
-    """Write the summary table as text."""
+    """Write the ten-seed summary table as text."""
     lines: list[str] = []
 
     def add(s: str = "") -> None:
         lines.append(s)
 
     add("=" * 78)
-    add(" CONTEXTUAL RSR — 10-seed results (lr=1e-4, epochs=100)")
+    add(" CONTEXTUAL RSR, 10-seed results (lr=1e-4, epochs=100)")
     add(f" Generated: {datetime.now().isoformat(timespec='seconds')}")
     add("=" * 78)
     add()
-    add("Hyperparameters identical to the word-level runs EXCEPT:")
+    add("Hyperparameters identical to the word-level runs except:")
     add(f"  - Word representations: cached contextual vectors")
     add(f"    (mean-pooled over up to 50 Wikipedia sentence occurrences)")
     add(f"  - Backbones fully frozen; only the 768->128 projection head trains")
@@ -126,7 +126,7 @@ def write_summary(bert_summary: dict, gpt2_summary: dict, path: Path) -> None:
 
     # Headline table.
     add("-" * 78)
-    add(" Table 2 (contextual): mean +/- std over 10 seeds")
+    add(" Contextual: mean +/- std over 10 seeds")
     add("-" * 78)
     add(f"{'':<24}{'BERT':>22}{'GPT-2':>22}")
     add(f"{'Category':<24}{'Vanilla':>11}{'RSR':>11}{'Vanilla':>11}{'RSR':>11}")
@@ -161,7 +161,7 @@ def write_summary(bert_summary: dict, gpt2_summary: dict, path: Path) -> None:
     add("-" * 78)
     add()
 
-    # Compact comparison vs the word-level runs.
+    # Comparison with the word-level runs.
     add("-" * 78)
     add(" Comparison with word-level runs (isolated-word encoding)")
     add("-" * 78)
@@ -191,7 +191,7 @@ def main() -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     overall_t0 = time.time()
 
-    print(f"=== Full contextual RSR run — {timestamp} ===", flush=True)
+    print(f"=== Full contextual RSR run, {timestamp} ===", flush=True)
     print(f"Models: bert, gpt2", flush=True)
     print(f"Seeds: {SEEDS}", flush=True)
     print(f"Hyperparams: lr={LR}, epochs={EPOCHS}", flush=True)

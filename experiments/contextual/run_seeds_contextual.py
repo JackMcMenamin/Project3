@@ -1,11 +1,11 @@
 """
-RSR Multi-Seed Experiment — Contextual-Vector Edition
+RSR Multi-Seed Experiment, Contextual-Vector Edition
 
 The same 10-seed RSR experiment as `run_bert_seeds.py` / `run_gpt2_seeds.py`,
 but every word's representation is the **cached contextual vector** produced
 by `extract_contextual_vectors.py` (mean-pooled over up to 50 Wikipedia
 sentences containing the word). The transformer backbones are not loaded at
-all here — only a 768→128 projection head is trainable, and that head is the
+all here, only a 768->128 projection head is trainable, and that head is the
 sole RSR-optimised parameter set.
 
 Compared to the original scripts:
@@ -13,9 +13,9 @@ Compared to the original scripts:
   * `get_word_embedding` is replaced with a cache lookup.
   * SimLex pairs whose words are not in the cache are dropped from
     evaluation and reported separately (no fallback encoding).
-  * Everything else — 10 seeds, 200 epochs, lr=1e-3, sample size 10000,
+  * Everything else, 10 seeds, 200 epochs, lr=1e-3, sample size 10000,
     soft-Spearman loss, the both/one/neither-in-RSR partition analysis,
-    Excel output — is preserved so the new numbers are directly comparable
+    Excel output, is preserved so the new numbers are directly comparable
     with the word-level results.
 
 Usage:
@@ -61,7 +61,7 @@ MEN_PATH = BASE_DATA_DIR / "MEN" / "MEN" / "MEN_dataset_lemma_form_full"
 SIMVERB_PATH = BASE_DATA_DIR / "simverb-3500-data" / "data" / "SimVerb-3500.txt"
 SIMLEX_PATH = BASE_DATA_DIR / "SimLex-999" / "SimLex-999.txt"
 
-# Hyperparameters — kept identical to the existing scripts so the comparison
+# Hyperparameters, kept identical to the existing scripts so the comparison
 # is honest. Note: BATCH_SIZE is unused now since cache lookups are O(1).
 RSR_EPOCHS = 200
 RSR_LR = 1e-3
@@ -121,11 +121,11 @@ class ContextualEmbeddings(nn.Module):
 
     The cached 768-d contextual vectors are stored in a non-trainable buffer
     (one row per known target). The trainable parameters are limited to the
-    768→128 projection head, which is what RSR optimises.
+    768->128 projection head, which is what RSR optimises.
     """
     def __init__(self, vectors: dict[str, np.ndarray], projection_dim: int = PROJECTION_DIM):
         super().__init__()
-        # Build deterministic key→row mapping.
+        # Build deterministic key->row mapping.
         self.keys: list[str] = sorted(vectors.keys())
         self.key_to_idx: dict[str, int] = {k: i for i, k in enumerate(self.keys)}
 
@@ -159,7 +159,7 @@ class ContextualEmbeddings(nn.Module):
 
 
 # ==============================================================================
-# Data loading — mirrors the existing scripts so RSR vocabulary stays identical
+# Data loading, mirrors the existing scripts so RSR vocabulary stays identical
 # ==============================================================================
 
 def load_men_pairs():
@@ -253,7 +253,7 @@ def load_cached_vectors(model_name: str) -> dict[str, np.ndarray]:
     data = np.load(cache_path)
     # Vectors are stored under slug keys (e.g. 'air_conditioner'); the cache
     # uses underscores to be filesystem-safe. The RSR pipeline uses spaces for
-    # MWEs (matching the manifest target column). Convert slug→space form so
+    # MWEs (matching the manifest target column). Convert slug->space form so
     # callers can index with whatever case the dataset gives them.
     out: dict[str, np.ndarray] = {}
     for slug in data.files:
@@ -405,7 +405,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print(f"Contextual RSR Multi-Seed Experiment — {args.model.upper()}")
+    print(f"Contextual RSR Multi-Seed Experiment, {args.model.upper()}")
     print(f"Seeds: {SEEDS}")
     print(f"Device: {DEVICE}")
     print(f"Torchsort: {HAS_TORCHSORT}")

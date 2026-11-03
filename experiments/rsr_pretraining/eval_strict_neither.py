@@ -26,12 +26,9 @@ from scipy.stats import spearmanr
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bert_rsr_continued_pretraining as B
 
-# The module-level sentence pool is only overridden by the --sentences-dir
-# flag inside its main(), which we never call, so it must be set here.
-# Without this the words are embedded in the ORIGINAL Simple English
-# sentences rather than the filtered full-Wikipedia pool the checkpoints
-# were trained on.
-B.SENTENCES_DIR = B.ARTIFACTS / "sentences_strict"
+# The pool the checkpoints were trained on. It is also the default; set it
+# explicitly so this script does not depend on that.
+B.paths.set_sentence_pool(B.ARTIFACTS / "sentences_strict")
 
 TAGS = ["strict_l12", "strict_l12_s2", "strict_l12_s3"]
 
