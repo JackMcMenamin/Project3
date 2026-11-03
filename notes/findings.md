@@ -1,7 +1,18 @@
 # Findings
 
-Running notes from the replication and the two evaluations. Numbers are held-out
-SimLex-999 Spearman unless stated otherwise.
+Running notes, oldest first. Numbers are held-out SimLex-999 Spearman unless
+stated otherwise. Later sections correct earlier ones in places. Open items are
+in `todo.md`.
+
+Current numbers, RSR minus matched control on the unsupervised (Neither) pairs:
+
+| model | setting | seeds | SimLex | MEN |
+|---|---|---|---|---|
+| BERT | 2,000 steps, early-stopped | 5 | +0.070 | +0.062 |
+| BERT | 8,000 steps at 1e-5, endpoint | 3 | +0.065 | |
+| GPT-2, layer 6 | 2,000 steps, early-stopped | 3 | +0.026 | +0.051 |
+| GPT-2, layer 6 | 2,000 steps, endpoint | 3 | +0.021 | |
+| GPT-2, layer 6 | 8,000 steps at 1e-5, endpoint | 3 | +0.023 | +0.060 |
 
 ## The original RoBERTa results reproduce
 
@@ -21,7 +32,7 @@ Wikipedia stream collected 405k sentences against the original 336k. Ordering an
 conclusions are identical. The fMRI pipeline reproduced exactly too: 2,296
 voxels, same as originally reported.
 
-## The effect decays at our learning rate - but not at the original one
+## The effect decays at our learning rate but not at the original one
 
 The decay experiment showed the late decline is not caused by RSR pressure, so
 the obvious next question was what happens if we simply keep training. One run at
@@ -801,6 +812,125 @@ subject to the same objection. Neither is tested.
 
 Script: `experiments/rsr_pretraining/eval_postspec_baseline.py`.
 Raw output: `notes/postspec_raw.txt`.
+
+
+## GPT-2 extended training: the gain persists, at a third of BERT's size
+
+The GPT-2 counterpart of the BERT long run. 8,000 steps at 1e-5, ten times the
+usual length, three seeds, matched CLM control, read-out at layer 6. Early
+stopping OFF, because on GPT-2 the all-pairs score declines from the start and a
+best-all-pairs rule returns the untrained model; everything below is read at
+matched steps.
+
+| partition | peak (step) | at step 8000 | mean, last 2000 | p (endpoint) | BERT: peak / end |
+|---|---|---|---|---|---|
+| Neither in RSR | +0.032 @1600-2400 | **+0.023** [+0.020, +0.026] | +0.023 | 0.0060 | +0.099 / +0.065 |
+| All pairs | +0.005 @400 | -0.026 [-0.029, -0.024] | -0.025 | 0.0036 | +0.047 / -0.002 |
+| One in RSR | 0 | -0.013 [-0.018, -0.009] | -0.014 | 0.044 | n/a |
+| Both in RSR | 0 | **-0.098** [-0.106, -0.093] | -0.096 | 0.00158 | n/a / -0.062 |
+
+Three things happen and they are the same three BERT showed.
+
+**The unsupervised gain persists.** It peaks at +0.032 around step 2,000, eases
+to +0.023 by step 4,800 and then holds flat to the end; it does not decay to
+zero. Between-seed range at the endpoint is 0.006. BERT went +0.099 to +0.065
+over the same schedule, so GPT-2 is about a third of the size throughout, the
+same ratio as the 2,000-step runs.
+
+**All-pairs goes below control.** -0.026 at the end, where BERT ended at -0.002.
+Trained this long, GPT-2 is worse than its control on SimLex overall and only
+the unsupervised partition is left holding a benefit.
+
+**The supervised pairs fall hard and keep falling.** -0.098 at the end, against
+BERT's -0.062, and still declining at step 8,000. The gap between Neither and
+Both is therefore 0.121 on GPT-2 against 0.127 on BERT: the same separation,
+reached almost entirely by the supervised pairs sinking rather than the
+unsupervised ones rising. The short-run observation that GPT-2 redistributes
+more than it adds holds all the way out.
+
+**MEN does not erode at all.** RSR minus control on the unsupervised MEN pairs
+at step 8,000 is +0.060 [+0.053, +0.064],
+against +0.051 at 2,000 steps. Whatever continued training washes out of the
+SimLex structure, it leaves the relatedness transfer untouched.
+
+Runs: `results/gpt2_continued_{rsr,baseline}_long_s{1,2,3}_*.csv`.
+Summary: `experiments/rsr_pretraining/summarise_gpt2_long.py`.
+
+
+## GPT-2 templates vs real sentences: half the BERT result does not replicate
+
+Same design as the BERT run: RSR trained on real sentences or on the fixed null
+frame "The word is X.", three seeds, matched CLM control, every checkpoint
+scored three ways. Neither at the final step, RSR minus control:
+
+| eval context | sentence-trained | template-trained | p | BERT: sent / tmpl / p |
+|---|---|---|---|---|
+| sentences | +0.021 [+0.015, +0.026] | +0.016 [+0.010, +0.023] | 0.37 | +0.045 / +0.019 / 0.037 |
+| bare | +0.001 [-0.000, +0.002] | -0.002 [-0.005, +0.001] | 0.16 | +0.129 / +0.116 / 0.29 |
+| template | +0.028 [+0.021, +0.032] | +0.022 [+0.014, +0.029] | 0.36 | +0.184 / +0.223 / 0.15 |
+
+**What does not replicate.** On BERT, template training delivered 42 percent of
+what real sentences delivered under contextual scoring, and the difference was
+significant. On GPT-2 it delivers about three quarters and the difference is
+nowhere near significant (p = 0.37). Template training is easier to optimise
+here too (mean RSR loss 0.223 against 0.257) but it is not reliably worse where
+it counts. So "training on a null context produces a worse model" is a BERT
+finding, not a general one, and should not be stated as general.
+
+**What replicates in a stronger form.** Bare-word scoring on GPT-2 is not a
+degraded instrument, it is a null one. Untouched GPT-2 scores -0.045 on bare
+words (BERT: 0.167), and after training the RSR gain that is plainly there in
+context (+0.021) registers as +0.001 bare. A causal model given one word with
+no left context has no usable representation, before or after RSR. On BERT the
+claim was that bare scoring could not separate two training regimes; on GPT-2
+it cannot see the effect at all.
+
+**What is BERT-only.** Continued MLM alone wrecked BERT's out-of-context probes
+(template 0.503 -> 0.250). Continued CLM leaves GPT-2's template probe flat
+(0.490 -> 0.484) and its bare probe was already at the floor. That finding
+stays with BERT.
+
+**Where this leaves templates.** The templates comparison was parked pending a closer look;
+this is the closer look. The defensible general statement is about evaluation
+context, not training context: out-of-context scoring understates or entirely
+misses the effect, and by more in a causal model. The training-regime
+comparison is model-dependent and the BERT number should not be generalised.
+
+Runs: `results/gpt2_continued_*_ctx_{sentences,template}_s{1,2,3}_*.csv`.
+Summary: `experiments/rsr_pretraining/summarise_gpt2_ablations.py`.
+
+
+## GPT-2 layer 12: the prediction holds, and it is a different mechanism
+
+On BERT, a layer that read better untouched gained less from RSR (layer 7 +0.027
+against layer 12 +0.053). GPT-2's gap between layers is far wider (0.180 against
+0.540 on the unsupervised pairs at step 0), so the prediction was that layer 12
+should gain more. Same recipe as the main runs, read-out at 12, own control,
+three seeds. RSR minus control:
+
+| partition | L6, early-stopped | L12, early-stopped | p | L12, endpoint |
+|---|---|---|---|---|
+| All | -0.010 | +0.108 [+0.099, +0.115] | 0.001 | +0.104 |
+| Both | -0.052 | +0.060 [+0.015, +0.093] | 0.034 | +0.040 |
+| One | -0.029 | +0.217 [+0.172, +0.249] | 0.006 | +0.230 |
+| **Neither** | +0.026 | **+0.123** [+0.095, +0.149] | 0.024 | **+0.136** (p = 0.005) |
+
+**The prediction holds, by a lot.** From a starting point of 0.180, layer 12
+gains +0.123 on the unsupervised pairs against layer 6's +0.026, and +0.136 at
+the endpoint.
+
+**But it is not the dissociation.** At layer 12 every partition rises, the
+supervised one included (+0.060), and the One partition most of all (+0.217).
+At layer 6, and in every BERT run, the supervised pairs fall while the
+unsupervised ones rise. What happens at layer 12 is a collapsed space being
+un-collapsed: the probe showed every cosine inside 0.994 +/- 0.006, and RSR
+spreads the space back out, which lifts everything. So this supports the narrow
+BERT claim, that a worse start gains more, while showing that at the extreme the
+gain is recovery from anisotropy rather than the selective reorganisation
+this project is about. The two should not be presented as the same effect.
+
+Runs: `results/gpt2_continued_{rsr,baseline}_L12_s{1,2,3}_*.csv`.
+Summary: `experiments/rsr_pretraining/summarise_gpt2_ablations.py`.
 
 ## Loose ends
 
