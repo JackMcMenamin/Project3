@@ -75,6 +75,23 @@ class SentencePool(unittest.TestCase):
             self.assertEqual(data.load_sentences_for("aardvark"), ["An aardvark digs."])
             self.assertFalse(data.has_sentences("zebra"))
 
+    def test_split_halves_are_disjoint(self):
+        with tempfile.TemporaryDirectory() as d:
+            with open(Path(d) / "aardvark.jsonl", "w", encoding="utf-8") as f:
+                for i in range(5):
+                    f.write(json.dumps({"sentence": f"Aardvark {i}."}) + "\n")
+            paths.set_sentence_pool(d)
+            self.assertEqual(len(data.load_sentences_for("aardvark", part="train")), 5)
+            data.set_sentence_split(True)
+            try:
+                train = data.load_sentences_for("aardvark", part="train")
+                held = data.load_sentences_for("aardvark", part="eval")
+                self.assertEqual(len(train) + len(held), 5)
+                self.assertFalse(set(train) & set(held))
+                self.assertEqual(len(data.load_sentences_for("aardvark")), 5)
+            finally:
+                data.set_sentence_split(False)
+
     def test_missing_pool_raises(self):
         with self.assertRaises(SystemExit):
             paths.set_sentence_pool("no/such/folder")

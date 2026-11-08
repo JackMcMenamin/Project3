@@ -38,6 +38,8 @@ SEEDS="1 2 3"
 # corpus. Every current result sits on the strict full-Wikipedia pool, so this
 # has to be passed explicitly or the run compares against nothing we have.
 POOL=artifacts/sentences_strict
+# These reproduce reported runs, which kept the best all-pairs checkpoint,
+# so they pass --early-stop. New runs should leave it off.
 SCRIPT=experiments/rsr_pretraining/bert_rsr_continued_pretraining.py
 LOG=logs
 mkdir -p "$LOG"
@@ -53,7 +55,7 @@ for seed in $SEEDS; do
     echo "=== seed $seed : sentences arm already complete, skipping ==="
   else
     echo "=== seed $seed : control + RSR on real sentences ==="
-    python "$SCRIPT" --regime compare --lambda 0.7 \
+    python "$SCRIPT" --early-stop --regime compare --lambda 0.7 \
       --steps "$STEPS" --eval-every "$EVAL_EVERY" --seed "$seed" \
       --rsr-context sentences --eval-contexts "$CONTEXTS" --sentences-dir "$POOL" \
       --save-tag "$tag" \
@@ -66,7 +68,7 @@ for seed in $SEEDS; do
     echo "=== seed $seed : template arm already complete, skipping ==="
   else
     echo "=== seed $seed : RSR on templates ==="
-    python "$SCRIPT" --regime rsr --lambda 0.7 \
+    python "$SCRIPT" --early-stop --regime rsr --lambda 0.7 \
       --steps "$STEPS" --eval-every "$EVAL_EVERY" --seed "$seed" \
       --rsr-context template --eval-contexts "$CONTEXTS" --sentences-dir "$POOL" \
       --save-tag "$tag" \

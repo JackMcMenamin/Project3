@@ -5,10 +5,15 @@ import pandas as pd
 import torch.nn.functional as F
 from scipy.stats import spearmanr
 
-from .data import PARTITIONS
+from .data import BREAKDOWNS, PARTITIONS
 
 LABELS = {"all": "All pairs", "both": "Both in RSR",
-          "one": "One in RSR", "neither": "Neither in RSR"}
+          "one": "One in RSR", "neither": "Neither in RSR",
+          "both_trained": "Both, pair trained", "both_unseen": "Both, pair unseen",
+          "both_N": "Both, nouns", "both_V": "Both, verbs",
+          "one_N": "One, nouns", "one_V": "One, verbs",
+          "neither_N": "Neither, nouns", "neither_V": "Neither, verbs",
+          "neither_A": "Neither, adjectives"}
 
 
 def score_partitions(emb: dict, cats: dict, min_n: int = 2) -> dict:
@@ -40,20 +45,22 @@ def print_eval(tag: str, res: dict) -> None:
 
 def history_row(df: pd.DataFrame, which: str = "best", metric: str = "all") -> dict:
     """Rebuild a result dict from a training history: the first row (step 0),
-    the last row, or the best row by `metric`."""
+    the last row, or the best row by `metric`. Breakdown columns are included
+    when the history has them."""
     if which == "first":
         row = df.iloc[0]
     elif which == "last":
         row = df.iloc[-1]
     else:
         row = df.loc[df[f"{metric}_rho"].idxmax()]
-    return {p: {"rho": row[f"{p}_rho"], "n": int(row[f"{p}_n"])} for p in PARTITIONS}
+    names = PARTITIONS + tuple(b for b in BREAKDOWNS if f"{b}_rho" in row.index)
+    return {p: {"rho": row[f"{p}_rho"], "n": int(row[f"{p}_n"])} for p in names}
 
 
 def print_comparison(vanilla: dict, rsr: dict, control: dict | None = None,
                      title: str = "SimLex-999 after continued pre-training") -> None:
     def rho(d, p):
-        return d[p]["rho"]
+        return d[p]["rho"] if p in d else float("nan")
 
     print("\n" + "=" * 72)
     print(title)
@@ -75,3 +82,21 @@ def print_comparison(vanilla: dict, rsr: dict, control: dict | None = None,
             print(f"{LABELS[p]:<16}{v:>9.3f}{c:>9.3f}{r:>9.3f}"
                   f"{r - v:>+10.3f}{r - c:>+10.3f}")
     print(f"\n  pairs evaluated: {vanilla['all']['n']}/999", flush=True)
+    print_breakdown(vanilla, rsr, control)
+
+
+def print_breakdown(vanilla: dict, rsr: dict, control: dict | None = None,
+                    min_n: int = 10) -> None:
+    """The finer splits, with pair counts. Splits under min_n pairs are left
+    out of the table (they are still in the CSV); the rest are noisy in
+    proportion to n."""
+    rows = [b for b in BREAKDOWNS if b in rsr and rsr[b]["n"] >= min_n]
+    if not rows:
+        return
+    ref = control if control is not None else vanilla
+    name = "RSR-Ctl" if control is not None else "RSR-Van"
+    print(f"\n  {'Breakdown':<22}{'n':>5}{'Vanilla':>9}{'RSR':>9}{name:>10}")
+    for b in rows:
+        v, r = vanilla.get(b, {}).get("rho", float("nan")), rsr[b]["rho"]
+        c = ref.get(b, {}).get("rho", float("nan"))
+        print(f"  {LABELS[b]:<22}{rsr[b]['n']:>5}{v:>9.3f}{r:>9.3f}{r - c:>+10.3f}")

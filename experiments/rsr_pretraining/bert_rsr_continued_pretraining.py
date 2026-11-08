@@ -17,11 +17,21 @@ The control (--regime baseline) is the same loop with the RSR term removed.
 
 Supervision is SimVerb-3500 plus THINGS. SimLex-999 is the evaluation set,
 split by how many of each pair's words are in the supervision (see
-rsr_core.data.exposure). MEN is held out entirely and scored by
-eval_men_transfer.py.
+rsr_core.data.exposure), and further by whether a Both pair is itself a
+supervision pair and by part of speech. MEN is held out entirely and scored
+by eval_men_transfer.py.
+
+The switches in rsr_core.cli change what is trained on and how it is
+sampled. All of them default to the reported runs except early stopping,
+which is off unless --early-stop is given. audit_supervision.py takes the
+same switches and reports what a configuration trains on without a model.
 
     python experiments/rsr_pretraining/bert_rsr_continued_pretraining.py \\
         --regime compare --lambda 0.7 --seed 1
+
+    # no SimLex pair in training, pair-first sampling, a third of pairs from SimVerb
+    python experiments/rsr_pretraining/bert_rsr_continued_pretraining.py \\
+        --exclude-simlex-pairs --sampler pairs --simverb-share 0.33 --seed 1
 
     # vanilla SimLex at every layer, no training
     python experiments/rsr_pretraining/bert_rsr_continued_pretraining.py --probe-layers
@@ -43,6 +53,7 @@ import json
 import random
 import sys
 import time
+from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from itertools import combinations
@@ -55,9 +66,13 @@ from transformers import BertForMaskedLM, BertTokenizerFast
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from rsr_core import paths
-from rsr_core.data import (RSR_TEMPLATE, find_subword_span, has_sentences,
-                           load_sentences_for, load_simlex, load_supervision,
-                           partition, set_seed)
+from rsr_core.cli import add_protocol_args, add_supervision_args, apply_args, describe
+from rsr_core.data import (RSR_TEMPLATE, find_subword_span, load_sentences_for,
+                           load_simlex, load_simlex_pos, partition, set_seed,
+                           set_sentence_split)
+from rsr_core.sampling import WordPicker, rsr_targets
+from rsr_core.supervision import (SupervisionOptions, anchor_words, batch_composition,
+                                  build_supervision)
 from rsr_core.loss import HAS_TORCHSORT, pair_loss
 from rsr_core.report import history_row, print_comparison, print_eval, score_partitions
 from rsr_core.paths import MODELS_DIR, RESULTS_DIR
@@ -92,11 +107,19 @@ class Config:
     # "sentences" averages up to 20 harvested sentences, "bare" is the word on
     # its own, "template" is RSR_TEMPLATE.
     eval_contexts: tuple = ("sentences",)
-    use_men: bool = False
-    # Keep the checkpoint with the best all-pairs SimLex. Note this selects on
-    # the evaluation set; pass --no-early-stop to read the final model.
-    early_stop: bool = True
+    # Keep the checkpoint with the best all-pairs SimLex. That selects on the
+    # evaluation set, so it is off unless --early-stop is given.
+    early_stop: bool = False
     early_stop_metric: str = "all"
+    # Supervision and sampling (rsr_core.supervision, rsr_core.sampling).
+    # The defaults are the reported runs.
+    use_men: bool = False
+    exclude_simlex: bool = False
+    inflect_verbs: bool = False
+    things_pairs: int | None = None
+    sampler: str = "words"
+    simverb_share: float | None = None
+    split_sentences: bool = False
 
 
 class BertRSR(nn.Module):
@@ -131,19 +154,20 @@ class BertRSR(nn.Module):
 
 
 class RSRBatchSampler:
-    """Draws N supervised words that have harvested sentences, puts each in one
-    of its sentences, and keeps the batch only if enough pairs are scored."""
+    """Takes candidate words from a WordPicker, puts each in one of its
+    sentences, and keeps the batch only if enough pairs are scored."""
 
-    def __init__(self, supervised_vocab: set[str], sim_lookup: dict, tokenizer, cfg: Config):
+    def __init__(self, picker: WordPicker, sim_lookup: dict, tokenizer, cfg: Config):
         self.cfg = cfg
         self.tokenizer = tokenizer
         self.sim_lookup = sim_lookup
-        self.targets = sorted(w for w in supervised_vocab if has_sentences(w))
+        self.picker = picker
+        self.targets = picker.targets
         self._sent_cache: dict[str, list[str]] = {}
 
     def _sentences(self, word: str) -> list[str]:
         if word not in self._sent_cache:
-            self._sent_cache[word] = load_sentences_for(word)
+            self._sent_cache[word] = load_sentences_for(word, part="train")
         return self._sent_cache[word]
 
     def sample_batch(self):
@@ -151,7 +175,7 @@ class RSRBatchSampler:
         if len(self.targets) < N:
             return None
         words, sents, spans = [], [], []
-        for word in random.sample(self.targets, k=min(len(self.targets), N * 6)):
+        for word in self.picker.candidates():
             if len(words) == N:
                 break
             if self.cfg.rsr_context == "template":
@@ -238,7 +262,7 @@ def embed_words_in_context(model: BertRSR, words: list[str], cfg: Config,
                 sents = [RSR_TEMPLATE.format(word=w)]
             else:
                 if w not in sent_cache:
-                    sent_cache[w] = load_sentences_for(w)
+                    sent_cache[w] = load_sentences_for(w, part="eval")
                 sents = sent_cache[w]
             if not sents:
                 continue
@@ -258,10 +282,11 @@ def embed_words_in_context(model: BertRSR, words: list[str], cfg: Config,
 
 
 def evaluate_simlex(model: BertRSR, simlex, supervised_vocab, cfg, sent_cache,
-                    context: str = "sentences") -> dict:
-    """Spearman against SimLex for all pairs and for each exposure partition.
+                    context: str = "sentences", lookup=None, pos=None) -> dict:
+    """Spearman against SimLex for all pairs, each exposure partition, and
+    the breakdowns `lookup` and `pos` allow (see rsr_core.data.partition).
     Every word is embedded once and shared across partitions."""
-    cats = partition(simlex, supervised_vocab)
+    cats = partition(simlex, supervised_vocab, lookup=lookup, pos=pos)
     words = list({w for p in simlex for w in p[:2]})
     emb = embed_words_in_context(model, words, cfg, sent_cache, context=context)
     return score_partitions(emb, cats)
@@ -271,20 +296,25 @@ class Shared:
     """Data loaded once per process and shared by both arms of a comparison."""
 
     def __init__(self, tokenizer, cfg: Config):
-        print(f"Loading supervision (MEN {'included' if cfg.use_men else 'excluded'}) ...",
-              flush=True)
-        self.sim_lookup, self.supervised_vocab = load_supervision(use_men=cfg.use_men)
+        print(f"Loading supervision ({describe(cfg)}) ...", flush=True)
+        self.sup = build_supervision(SupervisionOptions.from_config(cfg))
+        self.sim_lookup, self.supervised_vocab = self.sup.lookup, self.sup.vocab
         self.simlex = load_simlex()
-        print(f"  supervised vocab: {len(self.supervised_vocab)} | "
-              f"scored pairs: {len(self.sim_lookup) // 2} | "
-              f"SimLex pairs: {len(self.simlex)}", flush=True)
-        self.rsr_sampler = RSRBatchSampler(self.supervised_vocab, self.sim_lookup, tokenizer, cfg)
-        print(f"  usable RSR targets: {len(self.rsr_sampler.targets)}", flush=True)
-        # The MLM corpus is the harvested sentences of 400 random targets. The
+        self.simlex_pos = load_simlex_pos()
+        print(f"  {self.sup.summary()}", flush=True)
+        targets = rsr_targets(self.sup, cfg.rsr_context)
+        picker = WordPicker(self.sup, targets, cfg.rsr_batch_size, cfg.sampler,
+                            cfg.simverb_share)
+        self.rsr_sampler = RSRBatchSampler(picker, self.sim_lookup, tokenizer, cfg)
+        print(f"  usable RSR targets: {len(targets)}", flush=True)
+        # The MLM corpus is the harvested sentences of 400 random supervised
+        # words. They are drawn from the default supervision whatever the
+        # switches say, so configurations differ in the RSR term only. The
         # caller seeds `random` first so this is reproducible.
+        words = anchor_words(self.sup)
         self.mlm_sentences = []
-        for w in random.sample(self.rsr_sampler.targets, k=min(400, len(self.rsr_sampler.targets))):
-            self.mlm_sentences.extend(load_sentences_for(w))
+        for w in random.sample(words, k=min(400, len(words))):
+            self.mlm_sentences.extend(load_sentences_for(w, part="train"))
         print(f"  MLM sentences: {len(self.mlm_sentences)}", flush=True)
 
 
@@ -312,7 +342,8 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
 
     def evaluate():
         return {c: evaluate_simlex(model, shared.simlex, shared.supervised_vocab,
-                                   cfg, eval_cache, context=c) for c in contexts}
+                                   cfg, eval_cache, context=c, lookup=shared.sim_lookup,
+                                   pos=shared.simlex_pos) for c in contexts}
 
     def mlm_term():
         input_ids, attn, labels = mlm_batcher.sample_batch()
@@ -323,9 +354,9 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
     def rsr_term():
         sample = shared.rsr_sampler.sample_batch()
         if sample is None:
-            return None
+            return None, None
         batch, spans, words = sample
-        return rsr_loss_for_batch(model, batch, spans, words, shared.sim_lookup, cfg)
+        return rsr_loss_for_batch(model, batch, spans, words, shared.sim_lookup, cfg), words
 
     # Step 0. Context coverage differs (bare and template embed every word,
     # sentences drops words with no harvest), so each context's curve has to be
@@ -345,15 +376,18 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
 
     t0 = time.time()
     run_mlm, run_rsr, n_mlm, n_rsr = 0.0, 0.0, 0, 0
+    # scored pairs per RSR batch by source, logged with each evaluation
+    composition: Counter = Counter()
     for step in range(1, cfg.steps + 1):
         model.train()
         if regime == "rsr":
-            m, r = mlm_term(), rsr_term()
+            m, (r, words) = mlm_term(), rsr_term()
             if m is None or r is None:
                 continue
             loss = (1.0 - cfg.rsr_lambda) * m + cfg.rsr_lambda * r
             run_mlm += m.item(); n_mlm += 1
             run_rsr += r.item(); n_rsr += 1
+            composition.update(batch_composition(words, shared.sup.source))
         else:
             loss = mlm_term()
             if loss is None:
@@ -370,15 +404,21 @@ def train_one(cfg: Config, regime: str, model: BertRSR, shared: Shared,
             mlm_avg, rsr_avg = run_mlm / max(n_mlm, 1), run_rsr / max(n_rsr, 1)
             by_ctx = evaluate()
             res = by_ctx[primary]
+            mix = {f"rsr_pairs_{s}": n / max(n_rsr, 1) for s, n in sorted(composition.items())}
             if verbose:
                 print(f"step {step}/{cfg.steps}  mlm_loss={mlm_avg:.4f}  "
                       f"rsr_loss={rsr_avg:.4f}  ({time.time() - t0:.0f}s)", flush=True)
+                if mix:
+                    print("  scored pairs per RSR batch: " + ", ".join(
+                        f"{k[10:]} {v:.1f}" for k, v in mix.items()), flush=True)
                 for c in contexts:
                     print_eval(f"step {step}" if c == primary else f"step {step} {c}", by_ctx[c])
-            history.append(_eval_row(step, by_ctx, primary, mlm_loss=mlm_avg, rsr_loss=rsr_avg))
+            history.append(_eval_row(step, by_ctx, primary, mlm_loss=mlm_avg, rsr_loss=rsr_avg,
+                                     **mix))
             if partial_path is not None:
                 pd.DataFrame(history).to_csv(partial_path, index=False)
             run_mlm, run_rsr, n_mlm, n_rsr = 0.0, 0.0, 0, 0
+            composition.clear()
 
             if cfg.early_stop and res[cfg.early_stop_metric]["rho"] > best_metric:
                 best_metric = res[cfg.early_stop_metric]["rho"]
@@ -433,8 +473,8 @@ def probe_layers(cfg: Config, max_sents: int = 20) -> pd.DataFrame:
     model = BertRSR(cfg)
     model.eval()
     simlex = load_simlex()
-    _, supervised = load_supervision(use_men=cfg.use_men)
-    cats = partition(simlex, supervised)
+    sup = build_supervision(SupervisionOptions.from_config(cfg))
+    cats = partition(simlex, sup.vocab, lookup=sup.lookup, pos=load_simlex_pos())
     n_layers = model.mlm.config.num_hidden_layers
 
     words = sorted({w for p in simlex for w in p[:2]})
@@ -443,7 +483,7 @@ def probe_layers(cfg: Config, max_sents: int = 20) -> pd.DataFrame:
         for i, w in enumerate(words):
             target_ids = model.tokenizer(w, add_special_tokens=False)["input_ids"]
             total, count = None, 0
-            for sent in load_sentences_for(w)[:max_sents]:
+            for sent in load_sentences_for(w, part="eval")[:max_sents]:
                 enc = model.tokenizer(sent, add_special_tokens=True, truncation=True,
                                       max_length=cfg.max_seq_len, return_tensors="pt")
                 span = find_subword_span(enc["input_ids"][0].tolist(), target_ids)
@@ -513,10 +553,6 @@ def main() -> None:
     ap.add_argument("--eval-contexts", default=None,
                     help="comma-separated, from sentences, bare, template; the first "
                          "drives early stopping")
-    ap.add_argument("--use-men", action="store_true",
-                    help="add MEN to the supervision (it is normally the held-out test)")
-    ap.add_argument("--no-early-stop", action="store_true",
-                    help="report the final model rather than the best all-pairs checkpoint")
     ap.add_argument("--sentences-dir", default=None,
                     help="sentence pool relative to the repo root "
                          "(default artifacts/sentences_strict)")
@@ -526,6 +562,8 @@ def main() -> None:
                     help="no training: vanilla SimLex at every layer")
     ap.add_argument("--smoke", action="store_true",
                     help="20 steps on small batches, to check the pipeline runs")
+    add_supervision_args(ap)
+    add_protocol_args(ap)
     args = ap.parse_args()
 
     if args.sentences_dir is not None:
@@ -543,8 +581,9 @@ def main() -> None:
         cfg.learning_rate = args.lr
     if args.eval_contexts:
         cfg.eval_contexts = tuple(c.strip() for c in args.eval_contexts.split(",") if c.strip())
-    cfg.use_men = args.use_men
-    cfg.early_stop = not args.no_early_stop
+    apply_args(cfg, args)
+    set_sentence_split(cfg.split_sentences)
+    print(f"Configuration: {describe(cfg)}", flush=True)
     if args.smoke:
         cfg.steps, cfg.eval_every, cfg.mlm_batch_size = 20, 10, 4
 

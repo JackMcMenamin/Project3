@@ -64,6 +64,40 @@ finished, so an interrupted batch resumes.
 
 Each RSR arm has a control trained from the same seed on the same anchor
 sentences with the RSR term removed. Reported numbers are RSR minus control,
-averaged over seeds. By default the checkpoint with the best all-pairs SimLex
-score is kept; `--no-early-stop` reads the final model instead, and the notes
-give both.
+averaged over seeds. The final model is reported. `--early-stop` keeps the
+checkpoint with the best all-pairs SimLex instead, which selects on the test
+set; the runs in `notes/findings.md` up to November 2026 used it.
+
+## Switches
+
+Both training scripts take these. Every one defaults to the configuration of
+the reported runs, so a run with none of them reproduces those runs except for
+early stopping.
+
+| switch | effect |
+|---|---|
+| `--exclude-simlex-pairs` | drop every supervision pair that is also a SimLex pair (and its inflected copies) |
+| `--inflect-verbs` | add third person, past and gerund copies of each SimVerb pair at the same score |
+| `--things-pairs N` | train on a fixed random sample of N THINGS pairs instead of all 1.7M |
+| `--sampler pairs` | build RSR batches from drawn scored pairs instead of uniform words |
+| `--simverb-share F` | with `--sampler pairs`, draw a fraction F of pairs from SimVerb |
+| `--split-sentences` | train on the first half of each word's sentences, evaluate on the second |
+| `--early-stop` | keep the best all-pairs SimLex checkpoint |
+
+`audit_supervision.py` takes the same supervision and sampler switches and
+prints, without loading a model, what a configuration trains on: pairs per
+source, how many SimLex pairs are in training, the SimLex split by part of
+speech, and the scored pairs per RSR batch by source. Training logs the real
+per-batch counts (`rsr_pairs_*` columns) and scores SimLex in finer splits as
+well: Both split into pairs that were and were not training pairs, and every
+partition by part of speech.
+
+Inflected verb forms are new words with no harvested sentences. To use them in
+the sentence context, list them and harvest them first:
+
+```bash
+python experiments/rsr_pretraining/audit_supervision.py --inflect-verbs \
+    --write-missing artifacts/inflected_targets.txt
+python -u experiments/contextual/harvest_sentences_strict.py \
+    --targets-file artifacts/inflected_targets.txt
+```

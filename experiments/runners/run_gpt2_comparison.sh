@@ -42,6 +42,8 @@ EVAL_EVERY=200       # 10 SimLex points; MEN is scored at the endpoints.
 LAYER=6
 SEEDS="1 2 3"
 POOL=artifacts/sentences_strict
+# These reproduce reported runs, which kept the best all-pairs checkpoint,
+# so they pass --early-stop. New runs should leave it off.
 SCRIPT=experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py
 LOG=logs
 mkdir -p "$LOG"
@@ -54,7 +56,7 @@ for seed in $SEEDS; do
     continue
   fi
   echo "=== seed $seed : vanilla + CLM control + RSR, SimLex and MEN ==="
-  python "$SCRIPT" --regime compare --lambda 0.7 \
+  python "$SCRIPT" --early-stop --regime compare --lambda 0.7 \
     --steps "$STEPS" --eval-every "$EVAL_EVERY" --seed "$seed" \
     --rsr-layer "$LAYER" --sentences-dir "$POOL" --save-tag "$tag" \
     > "$LOG/gpt2_${tag}.log" 2>&1

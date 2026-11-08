@@ -22,6 +22,14 @@ Writes artifacts/sentences_strict/<slug>.jsonl, same format as the original
 harvest, so the trainer can point at it with --sentences-dir.
 
     python -u experiments/contextual/harvest_sentences_strict.py
+
+To add words to the pool without touching the existing files (for example the
+inflected verb forms, listed by audit_supervision.py --write-missing):
+
+    python -u experiments/contextual/harvest_sentences_strict.py --targets-file words.txt
+
+Words that already have a file are skipped, and the run keeps its own
+checkpoint and manifest named after the targets file.
 """
 from __future__ import annotations
 
@@ -154,9 +162,26 @@ def main() -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--shards", type=int, default=0,
                     help="stop after N shards (0 = all); useful for a quick look")
+    ap.add_argument("--targets-file", default=None,
+                    help="harvest these words (one per line) instead of the full inventory; "
+                         "words that already have a file in the pool are skipped")
     args = ap.parse_args()
 
-    targets = load_targets()
+    global CHECKPOINT, MANIFEST
+    if args.targets_file:
+        tag = Path(args.targets_file).stem
+        CHECKPOINT = ARTIFACTS / f".harvest_strict_{tag}_checkpoint.pkl"
+        MANIFEST = ARTIFACTS / f"sentences_strict_{tag}_manifest.csv"
+        targets = {}
+        for line in open(args.targets_file, encoding="utf-8"):
+            w = WHITESPACE.sub(" ", line.lower().strip())
+            if w and not (OUT_DIR / f"{slugify(w)}.jsonl").exists():
+                targets[w] = slugify(w)
+        if not targets:
+            print("every listed word already has sentences", flush=True)
+            return
+    else:
+        targets = load_targets()
     print(f"targets: {len(targets):,}", flush=True)
     A = build_automaton(targets)
 

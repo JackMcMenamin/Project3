@@ -1,6 +1,9 @@
 # To do
 
-Open items as of 3 November 2026. Numbers checked against the current loaders.
+Open items as of 8 November 2026. Numbers checked against the current loaders.
+Every switch named below is in both training scripts and in
+`audit_supervision.py`, which reports what a configuration trains on without
+loading a model.
 
 ## The loss is effectively Pearson, not Spearman
 
@@ -17,6 +20,9 @@ Open items as of 3 November 2026. Numbers checked against the current loaders.
 
 ## Checkpoint selection
 
+- Done in code: early stopping is off by default, `--early-stop` turns it on,
+  and the reproduction runners pass it explicitly. Still to decide: the fixed
+  step to report at, or a non-SimLex dev set.
 - Drop early stopping. Report every run at a fixed step chosen in advance, or
   select on a dev set that is not SimLex (WordSim-353 is in
   `brain_and_glue/data` and unused). The no-early-stop runs already exist:
@@ -48,6 +54,28 @@ Open items as of 3 November 2026. Numbers checked against the current loaders.
 - Rebalance the sampler so SimVerb pairs make up a fixed share of scored pairs
   per batch (for example a verb batch every k steps, or stratified sampling).
   Expect Both to improve if the verb explanation is right.
+- Switches: `--sampler pairs`, `--simverb-share F`, `--things-pairs N`,
+  `--inflect-verbs`. Every run now scores SimLex by part of speech
+  (`both_V`, `neither_A` and so on), so point 1 can be read off any new run.
+  Audit, scored pairs per 24-word batch (SimVerb share in brackets):
+
+  | configuration | pairs | SimVerb |
+  |---|---|---|
+  | reported runs (uniform words, all THINGS) | 139 | 0.26 (0.2%) |
+  | `--sampler pairs` | 275 | 0.03 (0.0%) |
+  | `--sampler pairs --simverb-share 0.33` | 131 | 4.8 (3.6%) |
+  | `--sampler pairs --things-pairs 10000` (the original pipeline) | 13 | 3.5 (26%) |
+
+  Pair-first sampling on its own makes the imbalance worse, because the
+  pairs are drawn from 1.7M THINGS pairs. Fixing the SimVerb share does not
+  help much either: the THINGS pairs that come along between the chosen
+  words swamp it. Only cutting THINGS to a sample moves SimVerb to a real
+  share, and the batch then carries a tenth of the scored pairs. So the
+  per-step RSR signal changes size as well, which a run has to account for
+  (lambda or batch size).
+- Inflected verb forms have almost no harvested sentences (21 of 2,460), so
+  `--inflect-verbs` does nothing in the sentence context until they are
+  harvested (README, Switches). In the template context it works now.
 
 ## Train and test overlap
 
@@ -60,13 +88,19 @@ Open items as of 3 November 2026. Numbers checked against the current loaders.
   raise their SimLex score.
 - Decide whether to drop the SimLex pairs from the supervision and rerun, which
   turns Both into a clean "words seen, pairs unseen" test.
+  `--exclude-simlex-pairs` does this. It drops 274 pairs (170 SimVerb, 104
+  THINGS) and no word leaves the supervision, so the partition is unchanged
+  and the run compares directly with the reported ones. Every run also
+  scores `both_trained` and `both_unseen` separately.
 - The original RoBERTa pipeline expands SimVerb to inflected forms (eats, ate,
   eating, same score) with lemminflect and pluralises nouns with inflect, then
   filters by corpus frequency. This pipeline does neither. If inflection
   expansion is added, check that no expanded pair coincides with a SimLex pair
   or an inflection of one.
 - Sentence leakage. Anchor sentences and evaluation sentences come from the
-  same pool. Split the pool once and rerun one seed.
+  same pool. Split the pool once and rerun one seed. `--split-sentences`
+  trains on the first half of each word's sentences and evaluates on the
+  second half, as the original pipeline does.
 
 ## Nouns-only experiment
 

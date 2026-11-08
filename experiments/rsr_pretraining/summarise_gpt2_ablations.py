@@ -22,7 +22,7 @@ import re
 
 import numpy as np
 import pandas as pd
-from scipy.stats import ttest_rel, ttest_1samp
+from scipy.stats import ttest_rel
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RES = os.path.join(ROOT, "results")

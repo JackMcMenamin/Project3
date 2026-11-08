@@ -29,6 +29,8 @@ EVAL_EVERY=200
 LAYER=6
 SEED=1
 POOL=artifacts/sentences_strict
+# These reproduce reported runs, which kept the best all-pairs checkpoint,
+# so they pass --early-stop. New runs should leave it off.
 SCRIPT=experiments/rsr_pretraining/gpt2_rsr_continued_pretraining.py
 LOG=logs
 mkdir -p "$LOG"
@@ -41,7 +43,7 @@ for lam in 0.3 0.5 0.9; do
     continue
   fi
   echo "=== lambda $lam : RSR only, control reused from the main run ==="
-  python "$SCRIPT" --regime rsr --lambda "$lam" \
+  python "$SCRIPT" --early-stop --regime rsr --lambda "$lam" \
     --steps "$STEPS" --eval-every "$EVAL_EVERY" --seed "$SEED" \
     --rsr-layer "$LAYER" --sentences-dir "$POOL" --save-tag "$tag" \
     > "$LOG/gpt2_${tag}.log" 2>&1
@@ -55,7 +57,7 @@ if ls results/gpt2_continued_rsr_"$tag"_*.csv >/dev/null 2>&1 \
   echo "=== last-token pooling : already complete, skipping ==="
 else
   echo "=== last-token pooling : control + RSR ==="
-  python "$SCRIPT" --regime compare --lambda 0.7 --pool last \
+  python "$SCRIPT" --early-stop --regime compare --lambda 0.7 --pool last \
     --steps "$STEPS" --eval-every "$EVAL_EVERY" --seed "$SEED" \
     --rsr-layer "$LAYER" --sentences-dir "$POOL" --save-tag "$tag" \
     > "$LOG/gpt2_${tag}.log" 2>&1
