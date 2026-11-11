@@ -1,5 +1,10 @@
 # To do
 
+Update, 11 November 2026: the supervision, overlap, sentence-split and
+early-stopping items below have been run (technical_report.md, E19 and E20).
+The rebalanced sampler raises Neither to +0.155, +0.188 with inflected verbs.
+Priorities are now section 6 of the technical report.
+
 Open items as of 8 November 2026. Numbers checked against the current loaders.
 Every switch named below is in both training scripts and in
 `audit_supervision.py`, which reports what a configuration trains on without

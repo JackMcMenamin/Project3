@@ -13,6 +13,13 @@ Current numbers, RSR minus matched control on the unsupervised (Neither) pairs:
 | GPT-2, layer 6 | 2,000 steps, early-stopped | 3 | +0.026 | +0.051 |
 | GPT-2, layer 6 | 2,000 steps, endpoint | 3 | +0.021 | |
 | GPT-2, layer 6 | 8,000 steps at 1e-5, endpoint | 3 | +0.023 | +0.060 |
+| BERT | 2,000 steps, endpoint, reported sampling | 5 | +0.045 | |
+| BERT | 2,000 steps, endpoint, SimLex excluded, pair-first, 10k THINGS | 5 | +0.155 | |
+| BERT | as above, plus inflected SimVerb | 5 | +0.188 | |
+
+The last three rows are from November 2026 and change the picture: see
+"Supervision balance" below. The structured version of these notes is
+`technical_report.md`.
 
 ## The original RoBERTa results reproduce
 
@@ -932,6 +939,78 @@ this project is about. The two should not be presented as the same effect.
 Runs: `results/gpt2_continued_{rsr,baseline}_L12_s{1,2,3}_*.csv`.
 Summary: `experiments/rsr_pretraining/summarise_gpt2_ablations.py`.
 
+## Supervision balance: verbs were never really trained, and fixing it triples the result
+
+Three problems with the supervision, all checked with `audit_supervision.py`
+before any training:
+
+- 274 of the 297 Both pairs were training pairs themselves (170 SimVerb, 104
+  THINGS). One and Neither are clean by construction.
+- A 24-word batch drawn uniformly carries about 139 scored pairs, 0.3 of them
+  SimVerb: 0.2% of the RSR signal. Both is about two thirds verbs.
+- Anchor and evaluation sentences came from the same pool.
+
+BERT, 2,000 steps, endpoint (no early stopping), 5 seeds, RSR minus matched
+control. `clean` adds `--exclude-simlex-pairs --split-sentences`; `pairs` adds
+`--sampler pairs --things-pairs 10000` to that; `inflect` adds
+`--inflect-verbs` with the inflected forms harvested from enwiki (2,495 of
+2,565 reached 10 sentences).
+
+| arm | All | Both | One | Neither | Both V | Both N | Neither A |
+|---|---|---|---|---|---|---|---|
+| endpoint | -0.016 | -0.066 | -0.044 | +0.045 | +0.104 | -0.021 | +0.082 |
+| clean | -0.019 | -0.053 | -0.039 | +0.039 | +0.134 | -0.101 | +0.068 |
+| pairs | +0.123 | +0.212 | +0.019 | +0.155 | +0.491 | -0.075 | +0.202 |
+| inflect | +0.144 | +0.219 | +0.025 | +0.188 | +0.502 | -0.065 | +0.224 |
+
+Paired across seeds: endpoint to clean changes nothing (Neither -0.006,
+p = 0.49). Clean to pairs: Neither +0.116 (p = 1e-6), Both +0.265
+(p = 1e-7), Both verbs +0.357. Pairs to inflect: Neither +0.033 (p = 0.011),
+Both unchanged. Neither ranges over [+0.137, +0.183] for pairs and
+[+0.179, +0.200] for inflect.
+
+**The overlap was not doing anything.** Removing every SimLex pair from
+training leaves Neither where it was. The "no SimLex pair is ever trained on"
+statement was wrong for Both and is now true in the clean arms.
+
+**Without early stopping the old headline is +0.045, not +0.070.** Neither
+peaks around step 280 and drifts down from there in the old configuration.
+
+**Getting SimVerb pairs into the batches is what matters.** Two one-seed arms
+keep all of THINGS:
+
+| arm (seed 1) | SimVerb pairs per batch | of | Neither | Both | Both V |
+|---|---|---|---|---|---|
+| pair-first, all THINGS | 0.03 | 275 | +0.036 | -0.047 | +0.123 |
+| pair-first, all THINGS, a third of draws from SimVerb | 4.6 | 134 | +0.142 | +0.176 | +0.502 |
+
+With all of THINGS, pair-first sampling on its own does nothing. Drawing a
+third of pairs from SimVerb recovers most of the gain while SimVerb is still
+only 3.4% of the scored pairs. So the gain follows the presence of a few
+SimVerb pairs in each batch, not their share of the loss and not the THINGS
+cut. One seed each, to be repeated.
+
+**The gain reaches words that were never supervised.** Neither adjectives,
+none of which appear anywhere in the supervision, gain +0.20 to +0.22. The
+best reading is that SimVerb was rated under the same similarity instructions
+as SimLex, so supervising it teaches the similarity/relatedness distinction
+itself, which then applies to unsupervised words. THINGS similarity comes from
+an odd-one-out task over object images, closer to category structure, and on
+its own it buys the +0.04 seen before.
+
+**Both nouns get worse in every arm** (-0.02 to -0.10), consistent with THINGS
+and SimLex disagreeing on nouns.
+
+**The gain no longer peaks early.** Neither peaks around step 1,000 in the
+pairs arms and ends 0.03 below the peak, against step 280 and a similar drop
+in the old setup. MLM loss is within 0.05 of the control in every arm.
+
+Not yet done: MEN on these checkpoints (the evaluators still use the default
+supervision vocabulary), GPT-2, more seeds for the two share arms.
+
+Runs: `results/bert_continued_{rsr,baseline}_sup_*_s{1..5}_*.csv`.
+Runner: `experiments/runners/run_supervision_checks.sh`.
+
 ## Loose ends
 
 **Report vs code, in the original repo.** Three places the write-up and the code
@@ -952,7 +1031,6 @@ anything goes out:
 differences: read-out layer (5 vs 12), learning rate (1e-5 vs 5e-5), and the
 supervision pool.
 
-**Also worth checking at some point.** The original splits each word's 60 sentences 30
-train / 30 eval; our BERT pipeline serves the same pool to both. Expected
-overlap is only ~2 of the 20 eval sentences per word so it's probably immaterial,
-and it can't touch the Neither bucket at all (those words are never RSR targets).
+**Checked.** The original splits each word's 60 sentences 30 train / 30 eval;
+our BERT pipeline served the same pool to both. `--split-sentences` now does the
+same split, and it makes no difference (see "Supervision balance").

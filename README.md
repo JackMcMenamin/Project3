@@ -12,8 +12,14 @@ was given ratings for. On SimLex-999, split by how many of each pair's words
 were supervised, the gain over a matched control lands on the pairs where
 neither word was supervised (BERT +0.070, five seeds; GPT-2 +0.026, three
 seeds), while the supervised pairs do not improve. MEN, held out entirely,
-shows the same pattern. Current numbers are at the top of `notes/findings.md`
-and open issues are in `notes/todo.md`.
+shows the same pattern. With the supervision rebalanced so verb pairs are
+actually trained (see Switches), the BERT gain on unsupervised pairs rises to
++0.155 to +0.188 at the final step, five seeds.
+
+`notes/technical_report.md` is the structured record: method, current
+numbers, every experiment with its motivation and result, and corrections.
+`notes/findings.md` is the working notebook and `notes/todo.md` the open
+items.
 
 ## Layout
 
