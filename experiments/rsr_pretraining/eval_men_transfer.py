@@ -21,7 +21,14 @@ way the first version of it did.
 
 Usage:
     python experiments/rsr_pretraining/eval_men_transfer.py
+    python experiments/rsr_pretraining/eval_men_transfer.py --label main         --runs sup_inflect_s1:sup_pairs_s1 sup_inflect_s2:sup_pairs_s2
+
+Each --runs item is RSR_TAG[:CONTROL_TAG]; the control defaults to the same tag.
+The partition and the sentence split are taken from the RSR checkpoint's saved
+config, so the vocabulary is the one that run trained on.
 """
+import argparse
+import csv
 import os
 import sys
 from collections import defaultdict
@@ -33,14 +40,16 @@ from scipy.stats import spearmanr
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bert_rsr_continued_pretraining as B
+from rsr_core.data import set_sentence_split
+from rsr_core.supervision import SupervisionOptions, build_supervision, run_options
 
 # The pool the checkpoints were trained on. It is also the default; set it
 # explicitly so this script does not depend on that.
 B.paths.set_sentence_pool(B.ARTIFACTS / "sentences_strict")
 
 MEN_PATH = B.DATA_DIR / "MEN" / "MEN" / "MEN_dataset_natural_form_full"
-# Seed 1 was saved without a seed suffix; 2 and 3 carry one. Tags whose
-# checkpoints are absent are skipped, so this runs with whatever exists.
+# The earlier runs. Seed 1 was saved without a seed suffix; 2 and 3 carry one.
+# Tags whose checkpoints are absent are skipped.
 TAGS = ["strict_l12", "strict_l12_s2", "strict_l12_s3"]
 ORDER = ["all", "both", "one", "neither"]
 
@@ -88,10 +97,26 @@ def score(ckpt, words, cats, cfg, label) -> dict[str, tuple[float, int]]:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--runs", nargs="+", default=TAGS,
+                    help="RSR_TAG[:CONTROL_TAG] per seed (default: the earlier runs)")
+    ap.add_argument("--label", default=None,
+                    help="write per-seed deltas to results/men_transfer_<label>.csv")
+    args = ap.parse_args()
+    runs = [(r.split(":") + [r])[:2] for r in args.runs]
+
     cfg = B.Config()
     pairs = load_men()
-    _, supervised = B.load_supervision(use_men=cfg.use_men)
+    run_json = B.REPO_ROOT / "models" / f"bert_rsr_{runs[0][0]}.json"
+    if run_json.exists():
+        opts, split = run_options(run_json)
+    else:
+        opts, split = SupervisionOptions(use_men=cfg.use_men), False
+    set_sentence_split(split)
+    supervised = build_supervision(opts).vocab
     print(f"MEN pairs: {len(pairs)}   supervised vocabulary: {len(supervised)}")
+    print(f"supervision: {opts}   split sentences: {split}")
 
     # Same three buckets as SimLex, defined by the same supervision vocabulary,
     # so the generalisation question is asked identically of both benchmarks.
@@ -110,8 +135,8 @@ def main() -> None:
     vanilla = score(None, words, cats, cfg, "vanilla")
 
     per_seed = []
-    for tag in TAGS:
-        ctrl_p = B.REPO_ROOT / "models" / f"bert_baseline_{tag}.pt"
+    for tag, ctag in runs:
+        ctrl_p = B.REPO_ROOT / "models" / f"bert_baseline_{ctag}.pt"
         rsr_p = B.REPO_ROOT / "models" / f"bert_rsr_{tag}.pt"
         if not (os.path.exists(ctrl_p) and os.path.exists(rsr_p)):
             print(f"\nskipping {tag}: checkpoints not on disk")
@@ -145,8 +170,17 @@ def main() -> None:
         sd = stdev(ds) if len(ds) > 1 else float("nan")
         print(f"  {part:<10}{mean(ds):>+9.4f}{sd:>9.4f}   "
               + ", ".join(f"{d:+.4f}" for d in ds))
-    print()
-    print("For reference, the same contrast on SimLex was +0.070 on Neither.")
+
+    if args.label:
+        out = B.RESULTS_DIR / f"men_transfer_{args.label}.csv"
+        with open(out, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["run", "partition", "n", "vanilla", "control", "rsr", "delta"])
+            for tag, ctrl, rsr in per_seed:
+                for part in ORDER:
+                    w.writerow([tag, part, rsr[part][1], vanilla[part][0],
+                                ctrl[part][0], rsr[part][0], rsr[part][0] - ctrl[part][0]])
+        print(f"\nwrote {out}")
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@ import unittest
 from rsr_core import data
 from rsr_core.sampling import WordPicker
 from rsr_core.supervision import (Supervision, SupervisionOptions, batch_composition,
-                                  build_supervision, inflect_pairs)
+                                  build_supervision, inflect_pairs, run_options)
 from tests.test_data import _supervision_available
 
 
@@ -103,6 +103,28 @@ class RealSupervision(unittest.TestCase):
         b = build_supervision(SupervisionOptions(things_pairs=10_000))
         self.assertEqual(a.counts()["things"], 10_000)
         self.assertEqual(a.lookup, b.lookup)
+
+
+class RunOptions(unittest.TestCase):
+    def _write(self, d: dict) -> str:
+        import json, tempfile
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        json.dump(d, f)
+        f.close()
+        return f.name
+
+    def test_reads_switches(self):
+        opts, split = run_options(self._write({
+            "exclude_simlex": True, "inflect_verbs": True, "things_pairs": 10000,
+            "split_sentences": True}))
+        self.assertEqual(opts, SupervisionOptions(exclude_simlex=True, inflect_verbs=True,
+                                                  things_pairs=10000))
+        self.assertTrue(split)
+
+    def test_old_config_gives_defaults(self):
+        opts, split = run_options(self._write({"regime": "rsr", "seed": 1}))
+        self.assertEqual(opts, SupervisionOptions())
+        self.assertFalse(split)
 
 
 if __name__ == "__main__":

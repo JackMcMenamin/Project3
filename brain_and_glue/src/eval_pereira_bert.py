@@ -238,6 +238,9 @@ def main():
     ap.add_argument("--allow-simulated", action="store_true",
                     help="run on RANDOM brain data if the CSVs are missing (wiring test only)")
     ap.add_argument("--skip-2v2", action="store_true", help="skip the (slow) 2vs2 test")
+    ap.add_argument("--sup-config", default=None,
+                    help="config JSON saved next to an RSR checkpoint; the partition then "
+                         "uses that run's supervision vocabulary (switches included)")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -258,7 +261,14 @@ def main():
           f"{sum(1 for w in words if wiki.get(w.lower()))}/{len(words)}", flush=True)
 
     # Partition masks from OUR supervision vocabulary
-    rsr_vocab = load_our_rsr_vocab(project_root)
+    if args.sup_config:
+        sys.path.insert(0, os.path.join(project_root, "experiments", "rsr_pretraining"))
+        from rsr_core.supervision import build_supervision, run_options
+        opts, _ = run_options(args.sup_config)
+        rsr_vocab = {w.replace("_", " ") for w in build_supervision(opts).vocab}
+        print(f"Supervision from {args.sup_config}: {opts}", flush=True)
+    else:
+        rsr_vocab = load_our_rsr_vocab(project_root)
     in_rsr = np.array([w.lower() in rsr_vocab for w in words], dtype=bool)
     counts = in_rsr[:, None].astype(int) + in_rsr[None, :].astype(int)
     masks = {"All pairs": None, "Both in RSR": counts == 2,

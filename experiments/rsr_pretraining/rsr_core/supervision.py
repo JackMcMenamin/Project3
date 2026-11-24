@@ -147,6 +147,21 @@ def build_supervision(opts: SupervisionOptions | None = None) -> Supervision:
     return Supervision(lookup, source, vocab, opts, dropped)
 
 
+def run_options(run_json) -> tuple[SupervisionOptions, bool]:
+    """Supervision options and the sentence-split flag of a saved run, read
+    from the config JSON written next to its checkpoint. Keys missing from
+    older JSONs take the defaults of the reported runs."""
+    import json
+    from types import SimpleNamespace
+    with open(run_json, encoding="utf-8") as f:
+        d = json.load(f)
+    cfg = SimpleNamespace(use_men=d.get("use_men", False),
+                          exclude_simlex=d.get("exclude_simlex", False),
+                          inflect_verbs=d.get("inflect_verbs", False),
+                          things_pairs=d.get("things_pairs"))
+    return SupervisionOptions.from_config(cfg), bool(d.get("split_sentences", False))
+
+
 def anchor_words(sup: Supervision) -> list[str]:
     """Words whose sentences make up the anchor (MLM or CLM) corpus: the
     default supervision's words that have sentences, whatever switches `sup`

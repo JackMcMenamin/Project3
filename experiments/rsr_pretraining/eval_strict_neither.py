@@ -13,7 +13,12 @@ it strictly needs to and the resulting number is a conservative floor.
 
 Usage:
     python experiments/rsr_pretraining/eval_strict_neither.py
+    python experiments/rsr_pretraining/eval_strict_neither.py         --runs sup_inflect_s1:sup_pairs_s1 sup_inflect_s2:sup_pairs_s2
+
+Each --runs item is RSR_TAG[:CONTROL_TAG]. The supervision vocabulary and the
+sentence split come from the RSR checkpoint's saved config.
 """
+import argparse
 import os
 import sys
 from collections import defaultdict
@@ -25,6 +30,8 @@ from scipy.stats import spearmanr
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bert_rsr_continued_pretraining as B
+from rsr_core.data import set_sentence_split
+from rsr_core.supervision import SupervisionOptions, build_supervision, run_options
 
 # The pool the checkpoints were trained on. It is also the default; set it
 # explicitly so this script does not depend on that.
@@ -74,9 +81,22 @@ def score(ckpt, words, cats, cfg, label):
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--runs", nargs="+", default=TAGS,
+                    help="RSR_TAG[:CONTROL_TAG] per seed (default: the earlier runs)")
+    args = ap.parse_args()
+    runs = [(r.split(":") + [r])[:2] for r in args.runs]
+
     cfg = B.Config()
     simlex = B.load_simlex()
-    _, supervised = B.load_supervision(use_men=cfg.use_men)
+    run_json = B.REPO_ROOT / "models" / f"bert_rsr_{runs[0][0]}.json"
+    if run_json.exists():
+        opts, split = run_options(run_json)
+    else:
+        opts, split = SupervisionOptions(use_men=cfg.use_men), False
+    set_sentence_split(split)
+    supervised = build_supervision(opts).vocab
     sup_stems = {stem(w) for w in supervised}
 
     cats = defaultdict(list)
@@ -102,8 +122,8 @@ def main() -> None:
     vanilla = score(None, words, cats, cfg, "vanilla")
 
     per_seed = []
-    for tag in TAGS:
-        c = B.REPO_ROOT / "models" / f"bert_baseline_{tag}.pt"
+    for tag, ctag in runs:
+        c = B.REPO_ROOT / "models" / f"bert_baseline_{ctag}.pt"
         r = B.REPO_ROOT / "models" / f"bert_rsr_{tag}.pt"
         if not (os.path.exists(c) and os.path.exists(r)):
             print(f"\nskipping {tag}: checkpoints not on disk")
