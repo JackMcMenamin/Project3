@@ -195,8 +195,24 @@ What currently stands:
 6. Out-of-context evaluation (bare word, null template) misstates the effect
    and is not used for effect sizes.
 
-Not yet measured under the recommended configuration: MEN, brain RSA, GLUE,
-GPT-2.
+Other evaluations of the recommended configuration (RSR minus control,
+partitions from that run's own vocabulary):
+
+| evaluation | seeds | All | Both | One | Neither |
+|---|---|---|---|---|---|
+| MEN | 5 | +0.040 | +0.019 | +0.055 | +0.032 |
+| MEN, reported sampling (for comparison) | 5 | +0.071 | +0.047 | +0.083 | +0.063 |
+| Pereira RSA, layer 12 | 3 x 10 subjects | +0.026 | -0.004 | +0.008 | +0.027 |
+| Pereira RSA, layer 7 | 3 x 10 subjects | +0.028 | +0.001 | +0.006 | +0.032 |
+| SimLex Neither, related forms removed | 5 | | | | +0.186 |
+
+7. The SimLex gain from the recommended configuration is not morphological
+   leakage from the inflected forms (E22).
+8. It transfers to MEN and to brain RSA, but the MEN transfer is about half
+   that of the reported sampling, while the SimLex gain is four times larger
+   (E21, E23). More SimVerb trades relatedness for similarity.
+
+Not yet measured under the recommended configuration: GLUE, GPT-2.
 
 ---
 
@@ -546,6 +562,89 @@ heading given.
   pairs_full and share33.
 - findings: "Supervision balance".
 
+### E21. MEN under the recommended configuration
+
+- **Date.** 24 November 2026. Runner
+  `experiments/runners/run_main_config_followups.sh`, steps `men_main` and
+  `men_endpoint`.
+- **Question.** Does the larger SimLex gain of the recommended configuration
+  carry over to a relatedness benchmark, as the reported sampling's did (E11)?
+- **Setup.** Evaluation only. E20 inflect checkpoints against the pairs
+  control, seeds 1 to 5; E20 endpoint checkpoints against their own control
+  for comparison. `eval_men_transfer.py` now rebuilds each run's supervision
+  from its saved config, so the partition follows that run's vocabulary and
+  the sentence split. Main configuration: 5,111 supervised words, MEN
+  partitions 379 / 1,213 / 1,408 (Both / One / Neither). Reported sampling:
+  2,652 words, 294 / 1,122 / 1,584.
+- **Result.** RSR minus control, mean over 5 seeds, one-sample p:
+
+  | configuration | All | Both | One | Neither |
+  |---|---|---|---|---|
+  | recommended | +0.040 (p = 7e-4) | +0.019 (p = 0.12) | +0.055 (p = 7e-4) | +0.032 (p = 0.002) |
+  | reported sampling | +0.071 (p = 3e-4) | +0.047 (p = 3e-4) | +0.083 (p = 2e-4) | +0.063 (p = 8e-4) |
+
+  Absolute All: vanilla 0.712, control 0.721, RSR 0.761 (recommended);
+  vanilla 0.712, control 0.708, RSR 0.779 (reported). Neither positive in
+  every seed in both configurations.
+- **Conclusions.**
+  1. The transfer to MEN survives the change of supervision, on every
+     partition and every seed.
+  2. It is about half as large. SimLex Neither goes from +0.045 to +0.188
+     while MEN Neither goes from +0.063 to +0.032, so the two benchmarks move
+     in opposite directions.
+  3. This fits the working explanation in E20: SimVerb pairs teach the
+     similarity versus relatedness distinction, which helps a similarity
+     benchmark and costs some relatedness. THINGS, which dominates the
+     reported sampling, is closer to relatedness.
+- **Results.** `results/men_transfer_main.csv`,
+  `results/men_transfer_endpoint.csv`.
+
+### E22. Stem check under the recommended configuration
+
+- **Question.** With inflected verb forms supervised, could Neither gain
+  through morphological neighbours (a Neither pair whose word shares a stem
+  with a supervised form)?
+- **Setup.** `eval_strict_neither.py`, inflect against pairs, seeds 1 to 5.
+  Drops every Neither pair with a word that shares a stem with any
+  supervised word, leaving 446 of 481.
+- **Result.** Neither +0.188 on all 481 pairs, +0.186 on the 446 strict pairs
+  (difference -0.002). Per seed strict: +0.174, +0.197, +0.195, +0.180,
+  +0.183.
+- **Conclusion.** Not stem leakage.
+
+### E23. Brain RSA under the recommended configuration
+
+- **Question.** Does the unsupervised gain show up in Pereira brain data under
+  the recommended configuration?
+- **Setup.** `eval_pereira_bert.py --layers all --sup-config`, seeds 1 to 3,
+  vanilla, pairs control and inflect RSR. The partition follows the run's
+  vocabulary: 57 of 180 Pereira concepts supervised (49 under the reported
+  sampling). Per-subject RSA averaged over the three training seeds, then a
+  paired t-test over the 10 subjects.
+- **Result.** RSR minus control:
+
+  | layer | All | Both | One | Neither |
+  |---|---|---|---|---|
+  | 7 | +0.028 (p = 0.030) | +0.001 | +0.006 | **+0.032 (p = 0.002, 9/10)** |
+  | 9 | +0.019 (p = 0.057) | +0.005 | +0.001 | +0.018 (p = 0.038, 8/10) |
+  | 12 | +0.026 (p = 0.044) | -0.004 | +0.008 | **+0.027 (p = 0.011, 9/10)** |
+
+  Neither at layer 12 against vanilla: +0.023 (p = 0.035). Single seeds at
+  layer 12: Neither +0.032 (p = 6e-4), +0.016 (p = 0.17), +0.033 (p = 0.029).
+  At layer 12 the control falls below vanilla on All (0.016 against 0.030);
+  at layer 7 it does not.
+- **Conclusions.**
+  1. The brain result holds: the gain is on unsupervised concepts, Both and
+     One are flat.
+  2. It is smaller than E04's single-seed +0.054. Part of that is seed
+     variance (one of three seeds misses significance on its own); part may
+     be the same similarity for relatedness trade as E21, since RSA with
+     sentence-level betas is not a similarity judgement.
+  3. The effect is clearest at layer 7, where the control is not degraded, so
+     it is not only a repair of the layer-12 read-out.
+- **Results.** `brain_and_glue/results/brain_main_s{1,2,3}/`,
+  `results/brain_main_seedmean.csv`.
+
 ---
 
 ## 5. Corrections and retracted claims
@@ -571,9 +670,10 @@ Highest priority first.
 1. **Seeds for E20 pairs_full and share33**, and a sweep of SimVerb share (or
    fixed SimVerb pairs per batch) with all of THINGS, to pin down what
    amount of verb supervision is needed.
-2. **MEN, brain RSA and GLUE under the recommended configuration.** The
-   post-hoc evaluators currently use the default supervision vocabulary and
-   must be made switch-aware first.
+2. **GLUE under the recommended configuration** (MEN and brain RSA done,
+   E21 and E23; running). A run with less SimVerb, or SimVerb plus all of
+   THINGS, to see whether the MEN cost in E21 can be avoided without losing
+   the SimLex gain.
 3. **GPT-2 under the recommended configuration**, 3 to 5 seeds.
 4. **Soft rank.** Install torchsort or raise the sigmoid strength, and rerun
    one seed, so the loss is a rank correlation as described, or describe it as

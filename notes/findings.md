@@ -1005,8 +1005,22 @@ and SimLex disagreeing on nouns.
 pairs arms and ends 0.03 below the peak, against step 280 and a similar drop
 in the old setup. MLM loss is within 0.05 of the control in every arm.
 
-Not yet done: MEN on these checkpoints (the evaluators still use the default
-supervision vocabulary), GPT-2, more seeds for the two share arms.
+**Outside SimLex, on the inflect checkpoints** (evaluators now rebuild each
+run's vocabulary from its saved config):
+
+| | All | Both | One | Neither |
+|---|---|---|---|---|
+| MEN, 5 seeds | +0.040 | +0.019 | +0.055 | +0.032 |
+| MEN, old sampling, 5 seeds | +0.071 | +0.047 | +0.083 | +0.063 |
+| Pereira RSA L12, 3 seeds x 10 subjects | +0.026 | -0.004 | +0.008 | +0.027 (p = 0.011) |
+| Pereira RSA L7 | +0.028 | +0.001 | +0.006 | +0.032 (p = 0.002) |
+
+Both still transfer, Neither positive in every MEN seed. But MEN transfer
+halves while SimLex quadruples: more SimVerb buys similarity at some cost in
+relatedness. The stem check is clean (Neither +0.188, +0.186 with related
+forms removed).
+
+Not yet done: GLUE, GPT-2, more seeds for the two share arms (running).
 
 Runs: `results/bert_continued_{rsr,baseline}_sup_*_s{1..5}_*.csv`.
 Runner: `experiments/runners/run_supervision_checks.sh`.
