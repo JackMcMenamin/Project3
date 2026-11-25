@@ -189,7 +189,7 @@ What currently stands:
    words roughly quadruples, the supervised pairs improve strongly, and All
    pairs rises by +0.14. Unsupervised adjectives gain +0.22.
 4. The gain follows the presence of a few SimVerb pairs per batch, not their
-   share of the loss (E20, one seed, to confirm).
+   share of the loss (E20, confirmed over three seeds in E24).
 5. Nouns supervised by THINGS get slightly worse on SimLex in every
    configuration.
 6. Out-of-context evaluation (bare word, null template) misstates the effect
@@ -645,6 +645,34 @@ heading given.
 - **Results.** `brain_and_glue/results/brain_main_s{1,2,3}/`,
   `results/brain_main_seedmean.csv`.
 
+### E24. Seeds 2 and 3 of the SimVerb-presence arms
+
+- **Date.** 24 to 25 November 2026. Step `split_arms_s23` of the follow-up
+  runner.
+- **Question.** E20 conclusion 4 (the gain follows the presence of SimVerb
+  pairs, not their share and not the THINGS cut) rested on one seed per arm.
+  Does it hold over three?
+- **Setup.** pairs_full and share33 as in E20, seeds 2 and 3, scored against
+  the clean control of the same seed.
+- **Result.** RSR minus clean control, final step, 3 seeds:
+
+  | arm | All | Both | One | Neither | Both V | Both N | Neither N | Neither A |
+  |---|---|---|---|---|---|---|---|---|
+  | clean (s1 to 3) | -0.020 | -0.048 | -0.049 | +0.039 | +0.138 | -0.094 | +0.019 | +0.084 |
+  | pairs_full | -0.026 | -0.065 | -0.043 | +0.031 | +0.095 | -0.079 | +0.019 | +0.064 |
+  | share33 | **+0.086** | **+0.176** | -0.024 | **+0.131** | **+0.513** | -0.042 | +0.095 | +0.198 |
+
+  Neither per seed: pairs_full +0.036, +0.036, +0.020; share33 +0.142,
+  +0.129, +0.122. SimVerb pairs per batch: pairs_full 0.01 to 0.03, share33
+  4.6 to 5.0. Paired against the clean RSR arm over seeds 1 to 3: pairs_full
+  Neither p = 0.45, All p = 0.54; share33 Neither p = 0.016, All p = 0.010.
+- **Conclusion.** Confirmed. Pair-first sampling with all of THINGS is
+  indistinguishable from word sampling; a third of draws from SimVerb, with
+  all of THINGS kept, recovers about 70% of the Neither gain of the
+  recommended configuration and all of the Both verb gain. The THINGS cut is
+  not needed; the SimVerb pairs are.
+- **Results.** `results/bert_continued_rsr_sup_{pairs_full,share33}_s{1,2,3}_*.csv`.
+
 ---
 
 ## 5. Corrections and retracted claims
@@ -667,9 +695,10 @@ heading given.
 
 Highest priority first.
 
-1. **Seeds for E20 pairs_full and share33**, and a sweep of SimVerb share (or
-   fixed SimVerb pairs per batch) with all of THINGS, to pin down what
-   amount of verb supervision is needed.
+1. **A sweep of SimVerb share** (or fixed SimVerb pairs per batch) with all
+   of THINGS, to pin down what amount of verb supervision is needed, scored
+   on SimLex and MEN together (E21 suggests a trade). Seeds for pairs_full
+   and share33 done (E24).
 2. **GLUE under the recommended configuration** (MEN and brain RSA done,
    E21 and E23; running). A run with less SimVerb, or SimVerb plus all of
    THINGS, to see whether the MEN cost in E21 can be avoided without losing

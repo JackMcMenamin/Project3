@@ -976,19 +976,20 @@ statement was wrong for Both and is now true in the clean arms.
 **Without early stopping the old headline is +0.045, not +0.070.** Neither
 peaks around step 280 and drifts down from there in the old configuration.
 
-**Getting SimVerb pairs into the batches is what matters.** Two one-seed arms
-keep all of THINGS:
+**Getting SimVerb pairs into the batches is what matters.** Two arms keep all
+of THINGS, three seeds each, against the clean control:
 
-| arm (seed 1) | SimVerb pairs per batch | of | Neither | Both | Both V |
+| arm (seeds 1-3) | SimVerb pairs per batch | Neither | Both | Both V | All |
 |---|---|---|---|---|---|
-| pair-first, all THINGS | 0.03 | 275 | +0.036 | -0.047 | +0.123 |
-| pair-first, all THINGS, a third of draws from SimVerb | 4.6 | 134 | +0.142 | +0.176 | +0.502 |
+| pair-first, all THINGS | 0.01-0.03 | +0.031 | -0.065 | +0.095 | -0.026 |
+| pair-first, all THINGS, a third of draws from SimVerb | 4.6-5.0 | +0.131 | +0.176 | +0.513 | +0.086 |
 
-With all of THINGS, pair-first sampling on its own does nothing. Drawing a
-third of pairs from SimVerb recovers most of the gain while SimVerb is still
-only 3.4% of the scored pairs. So the gain follows the presence of a few
-SimVerb pairs in each batch, not their share of the loss and not the THINGS
-cut. One seed each, to be repeated.
+With all of THINGS, pair-first sampling on its own does nothing (no different
+from the clean arm, p = 0.45). Drawing a third of pairs from SimVerb recovers
+most of the gain (p = 0.016 against clean) while SimVerb is still only 3.4% of
+the scored pairs. So the gain follows the presence of a few SimVerb pairs in
+each batch, not their share of the loss and not the THINGS cut. Every seed
+agrees.
 
 **The gain reaches words that were never supervised.** Neither adjectives,
 none of which appear anywhere in the supervision, gain +0.20 to +0.22. The
@@ -1020,7 +1021,7 @@ halves while SimLex quadruples: more SimVerb buys similarity at some cost in
 relatedness. The stem check is clean (Neither +0.188, +0.186 with related
 forms removed).
 
-Not yet done: GLUE, GPT-2, more seeds for the two share arms (running).
+Not yet done: GLUE, GPT-2 (running).
 
 Runs: `results/bert_continued_{rsr,baseline}_sup_*_s{1..5}_*.csv`.
 Runner: `experiments/runners/run_supervision_checks.sh`.
