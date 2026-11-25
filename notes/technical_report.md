@@ -205,14 +205,19 @@ partitions from that run's own vocabulary):
 | Pereira RSA, layer 12 | 3 x 10 subjects | +0.026 | -0.004 | +0.008 | +0.027 |
 | Pereira RSA, layer 7 | 3 x 10 subjects | +0.028 | +0.001 | +0.006 | +0.032 |
 | SimLex Neither, related forms removed | 5 | | | | +0.186 |
+| GPT-2 layer 6, SimLex | 3 | +0.064 | +0.117 | +0.032 | +0.078 |
+| GPT-2 layer 6, MEN | 3 | +0.053 | +0.042 | +0.063 | +0.050 |
 
 7. The SimLex gain from the recommended configuration is not morphological
    leakage from the inflected forms (E22).
 8. It transfers to MEN and to brain RSA, but the MEN transfer is about half
    that of the reported sampling, while the SimLex gain is four times larger
-   (E21, E23). More SimVerb trades relatedness for similarity.
+   (E21, E23). In BERT more SimVerb trades relatedness for similarity; GPT-2
+   keeps its MEN gain, so the trade is not general (E25).
+9. GPT-2 under the recommended configuration shows the same shape at about
+   40% of BERT's SimLex size (Neither +0.078), with a larger anchor cost (E25).
 
-Not yet measured under the recommended configuration: GLUE, GPT-2.
+Not yet measured under the recommended configuration: GLUE (running).
 
 ---
 
@@ -673,6 +678,42 @@ heading given.
   not needed; the SimVerb pairs are.
 - **Results.** `results/bert_continued_rsr_sup_{pairs_full,share33}_s{1,2,3}_*.csv`.
 
+### E25. GPT-2 under the recommended configuration
+
+- **Date.** 25 November 2026. Steps `gpt2_main_s{1,2,3}`.
+- **Question.** Does the effect of putting SimVerb pairs in the batches carry
+  over to a causal model? E14 found GPT-2 at about a third of BERT's SimLex
+  gain under word sampling.
+- **Setup.** `gpt2_rsr_continued_pretraining.py --regime compare --lambda 0.7
+  --steps 2000 --rsr-layer 6` with the recommended switches, seeds 1 to 3,
+  final step. 23,310 scored pairs over 5,111 words, the same supervision as
+  the BERT runs. MEN partitioned by the same vocabulary inside the script.
+- **Result.** RSR minus control, 3 seeds:
+
+  | | All | Both | One | Neither | Both V | Both N | Neither N | Neither A |
+  |---|---|---|---|---|---|---|---|---|
+  | SimLex | +0.064 | +0.117 | +0.032 | **+0.078** | +0.382 | -0.165 | +0.055 | +0.110 |
+  | MEN | +0.053 | +0.042 | +0.063 | +0.050 | | | | |
+
+  SimLex Neither per seed +0.083, +0.066, +0.086 (p = 0.006); All p = 0.003;
+  Both p = 0.002. MEN Neither +0.057, +0.036, +0.057 (p = 0.019). Absolute
+  SimLex Neither: control 0.532, RSR 0.610. Peak Neither gain +0.086 to
+  +0.098, at steps 900 to 2,000. Final CLM loss 0.25 to 0.33 above the
+  control (0.10 to 0.13 in E14; the BERT MLM cost in E20 is 0.03 to 0.08).
+- **Conclusions.**
+  1. The supervision effect transfers to GPT-2. SimLex Neither goes from
+     +0.021 (E14, endpoint) to +0.078, nearly fourfold, as in BERT; Both flips
+     from -0.088 to +0.117, again through the verbs, and supervised nouns get
+     worse.
+  2. GPT-2 stays at about 40% of BERT's SimLex gain.
+  3. GPT-2's MEN gain does not fall (+0.051 in E14, +0.050 here). The
+     similarity versus relatedness trade of E21 is a BERT result, not a
+     general consequence of the supervision.
+  4. The anchor pays more than in BERT. Downstream checks for GPT-2 have not
+     been run.
+- **Results.** `results/gpt2_continued_{rsr,baseline}_sup_main_s{1,2,3}_*.csv`,
+  logs `logs/followups/gpt2_main_s*.log`.
+
 ---
 
 ## 5. Corrections and retracted claims
@@ -703,7 +744,9 @@ Highest priority first.
    E21 and E23; running). A run with less SimVerb, or SimVerb plus all of
    THINGS, to see whether the MEN cost in E21 can be avoided without losing
    the SimLex gain.
-3. **GPT-2 under the recommended configuration**, 3 to 5 seeds.
+3. **GPT-2 anchor cost.** CLM loss rises 0.29 above the control under the
+   recommended configuration (E25). Check perplexity on held-out text, or
+   a downstream task, before claiming no damage for GPT-2.
 4. **Soft rank.** Install torchsort or raise the sigmoid strength, and rerun
    one seed, so the loss is a rank correlation as described, or describe it as
    Pearson.

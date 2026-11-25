@@ -1021,7 +1021,14 @@ halves while SimLex quadruples: more SimVerb buys similarity at some cost in
 relatedness. The stem check is clean (Neither +0.188, +0.186 with related
 forms removed).
 
-Not yet done: GLUE, GPT-2 (running).
+**GPT-2, same switches, 3 seeds, final step, layer 6:** SimLex Neither +0.078
+(from +0.021 under word sampling), Both +0.117, Both verbs +0.38, Both nouns
+-0.17, All +0.064. MEN Neither +0.050, the same as under word sampling. So
+the supervision fix carries over to GPT-2 at about 40% of BERT's size, and
+the MEN trade above is BERT-only. GPT-2's CLM loss ends 0.29 above its
+control, more than before (0.12) and more than BERT pays.
+
+Not yet done: GLUE (running).
 
 Runs: `results/bert_continued_{rsr,baseline}_sup_*_s{1..5}_*.csv`.
 Runner: `experiments/runners/run_supervision_checks.sh`.

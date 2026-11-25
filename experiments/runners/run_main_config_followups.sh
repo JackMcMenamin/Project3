@@ -20,6 +20,8 @@ DONE=$LOG/done
 mkdir -p "$DONE"
 EVAL=experiments/rsr_pretraining
 POOL=artifacts/sentences_strict
+# transformers imports TensorFlow when present, and fails with Keras 3
+export USE_TF=0
 MAIN="--exclude-simlex-pairs --split-sentences --sampler pairs --things-pairs 10000 --inflect-verbs"
 
 step() {  # step <name> <command...>
