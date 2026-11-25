@@ -217,7 +217,12 @@ partitions from that run's own vocabulary):
 9. GPT-2 under the recommended configuration shows the same shape at about
    40% of BERT's SimLex size (Neither +0.078), with a larger anchor cost (E25).
 
-Not yet measured under the recommended configuration: GLUE (running).
+10. GLUE is at parity on four of five tasks; MRPC loses 0.022 in every
+    checkpoint (E26).
+
+Every evaluation of the earlier configuration now has a recommended-
+configuration counterpart except the read-out and extended-training
+experiments.
 
 ---
 
@@ -714,6 +719,38 @@ heading given.
 - **Results.** `results/gpt2_continued_{rsr,baseline}_sup_main_s{1,2,3}_*.csv`,
   logs `logs/followups/gpt2_main_s*.log`.
 
+### E26. GLUE under the recommended configuration
+
+- **Date.** 25 November 2026. Steps `glue_main_s{1,2,3}`. The first attempt
+  failed at import (transformers loading TensorFlow under Keras 3); the
+  runner now sets `USE_TF=0`.
+- **Question.** Does the recommended configuration cost downstream ability,
+  as the reported sampling did not (E04)?
+- **Setup.** `eval_downstream_bert.py`, BERT inflect RSR and pairs control
+  from seeds 1 to 3, vanilla once; MRPC, RTE, CoLA, STS-B, SST-2; 3
+  fine-tuning seeds per checkpoint, 10% warmup, degenerate-run detector.
+- **Result.** Mean over 3 checkpoints x 3 fine-tuning seeds; paired over
+  checkpoints:
+
+  | task | vanilla | control | RSR | RSR - control | per checkpoint | p |
+  |---|---|---|---|---|---|---|
+  | MRPC (acc) | 0.862 | 0.840 | 0.818 | **-0.022** | -0.020, -0.025, -0.021 | 0.003 |
+  | RTE | 0.668 | 0.629 | 0.640 | +0.012 | +0.004, +0.020, +0.011 | 0.14 |
+  | CoLA | 0.575 | 0.562 | 0.572 | +0.010 | -0.001, +0.018, +0.013 | 0.23 |
+  | STS-B | 0.892 | 0.889 | 0.889 | +0.001 | | 0.87 |
+  | SST-2 | 0.928 | 0.924 | 0.924 | +0.000 | | 1.00 |
+
+  MRPC F1: control 0.890, RSR 0.875. 0 degenerate runs of 105.
+- **Conclusions.**
+  1. Parity on four of five tasks; CoLA, the syntactic task, is not hurt.
+  2. MRPC loses 0.022 accuracy in every checkpoint. Under the reported
+     sampling it was +0.002 (E04). The stronger verb supervision has a small,
+     consistent cost on paraphrase detection. This is the one measured price
+     of the recommended configuration.
+  3. Continued MLM training alone already costs MRPC 0.022 and RTE 0.039
+     relative to vanilla, so both RSR and control sit below stock BERT there.
+- **Results.** `brain_and_glue/results/downstream_main_s{1,2,3}/downstream_results.json`.
+
 ---
 
 ## 5. Corrections and retracted claims
@@ -740,10 +777,10 @@ Highest priority first.
    of THINGS, to pin down what amount of verb supervision is needed, scored
    on SimLex and MEN together (E21 suggests a trade). Seeds for pairs_full
    and share33 done (E24).
-2. **GLUE under the recommended configuration** (MEN and brain RSA done,
-   E21 and E23; running). A run with less SimVerb, or SimVerb plus all of
-   THINGS, to see whether the MEN cost in E21 can be avoided without losing
-   the SimLex gain.
+2. **The costs of the recommended configuration.** MEN halves in BERT (E21)
+   and MRPC drops 0.022 (E26). Score share33 (all of THINGS, a third
+   SimVerb) on MEN and MRPC to see whether keeping THINGS avoids either cost
+   while keeping most of the SimLex gain.
 3. **GPT-2 anchor cost.** CLM loss rises 0.29 above the control under the
    recommended configuration (E25). Check perplexity on held-out text, or
    a downstream task, before claiming no damage for GPT-2.

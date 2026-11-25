@@ -1028,7 +1028,12 @@ the supervision fix carries over to GPT-2 at about 40% of BERT's size, and
 the MEN trade above is BERT-only. GPT-2's CLM loss ends 0.29 above its
 control, more than before (0.12) and more than BERT pays.
 
-Not yet done: GLUE (running).
+**GLUE on the inflect checkpoints** (3 checkpoints x 3 fine-tuning seeds, 0
+collapsed runs of 105): RSR minus control MRPC -0.022 (every checkpoint,
+p = 0.003), RTE +0.012, CoLA +0.010, STS-B +0.001, SST-2 0.000. Parity
+everywhere except MRPC, which was +0.002 under the old sampling. A small,
+consistent cost on paraphrase detection, the one measurable price of the
+stronger verb supervision.
 
 Runs: `results/bert_continued_{rsr,baseline}_sup_*_s{1..5}_*.csv`.
 Runner: `experiments/runners/run_supervision_checks.sh`.
