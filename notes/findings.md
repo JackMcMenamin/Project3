@@ -1035,6 +1035,36 @@ everywhere except MRPC, which was +0.002 under the old sampling. A small,
 consistent cost on paraphrase detection, the one measurable price of the
 stronger verb supervision.
 
+**SimVerb share, all of THINGS kept** (3 seeds each, against the clean
+control):
+
+| share | SimVerb pairs per batch | SimLex All | SimLex Neither | Both V | MEN Neither | MRPC |
+|---|---|---|---|---|---|---|
+| 0 (pairs_full) | 0.03 | -0.026 | +0.031 | +0.095 | +0.051 | |
+| 0.10 | 1.3 | -0.003 | +0.048 | +0.223 | +0.055 | |
+| 0.33 | 4.6 | +0.086 | +0.131 | +0.513 | +0.064 | -0.007 |
+| 0.66 | 10.5 | +0.110 | +0.160 | +0.518 | +0.065 | |
+| inflect (10k THINGS) | 7.4 | +0.144 | +0.188 | | +0.032 | -0.022 |
+
+Two things change. First, it is the amount of SimVerb that matters, not just
+its presence: about one pair per batch fixes the supervised verbs but barely
+moves the unsupervised words, five gets most of the way, ten adds a little
+more (share66 above share33 on Neither, p = 0.027). Second, the
+similarity-for-relatedness story above is wrong. MEN does not drop as SimVerb
+goes up; at 10.5 SimVerb pairs per batch it is as high as under the old
+sampling. And share33 on GLUE has MRPC -0.007, one checkpoint of three, with
+the rest at parity (RTE +0.032). So both costs of the inflect configuration
+come from cutting THINGS to 10k pairs, or from the inflected forms, not from
+the verb supervision.
+
+**It is the inflected forms that cost MEN.** The pairs arm (10k THINGS, no
+inflection, 5 seeds) keeps the full MEN transfer: All +0.065, Neither +0.063,
+every seed between +0.054 and +0.074. The inflect arm, same control, has All
++0.040. So inflection buys +0.033 on SimLex Neither and pays about 0.025 to
+0.03 on MEN. pairs (Neither +0.155) and share66 (+0.160) both get most of the
+SimLex gain with none of the MEN cost. Still to run: GLUE on pairs, to see
+whether the MRPC cost is also the inflections, and GLUE on share66.
+
 Runs: `results/bert_continued_{rsr,baseline}_sup_*_s{1..5}_*.csv`.
 Runner: `experiments/runners/run_supervision_checks.sh`.
 

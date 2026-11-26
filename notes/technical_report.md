@@ -5,7 +5,7 @@ run, what it showed, and which earlier claims it changed. `findings.md` stays
 as the working notebook with the full discussion; this file is the reference
 version, kept current and written to be lifted into a paper.
 
-Last updated: 11 November 2026.
+Last updated: 26 November 2026.
 
 How this file is maintained:
 
@@ -188,8 +188,9 @@ What currently stands:
 3. With SimVerb pairs actually present in batches, the gain on unsupervised
    words roughly quadruples, the supervised pairs improve strongly, and All
    pairs rises by +0.14. Unsupervised adjectives gain +0.22.
-4. The gain follows the presence of a few SimVerb pairs per batch, not their
-   share of the loss (E20, confirmed over three seeds in E24).
+4. The gain follows the number of SimVerb pairs per batch: little below one,
+   most of it by about five, and still rising slowly at ten (E20, E24, E27).
+   The THINGS cut is not needed for it.
 5. Nouns supervised by THINGS get slightly worse on SimLex in every
    configuration.
 6. Out-of-context evaluation (bare word, null template) misstates the effect
@@ -212,13 +213,30 @@ partitions from that run's own vocabulary):
    leakage from the inflected forms (E22).
 8. It transfers to MEN and to brain RSA, but the MEN transfer is about half
    that of the reported sampling, while the SimLex gain is four times larger
-   (E21, E23). In BERT more SimVerb trades relatedness for similarity; GPT-2
-   keeps its MEN gain, so the trade is not general (E25).
+   (E21, E23). This is not a similarity for relatedness trade: with all of
+   THINGS kept, MEN holds as SimVerb rises (E27), and GPT-2 keeps its MEN
+   gain (E25). The MEN cost comes from the inflected SimVerb forms; the 10k
+   THINGS sample without them keeps the full MEN transfer (+0.063, E29).
 9. GPT-2 under the recommended configuration shows the same shape at about
    40% of BERT's SimLex size (Neither +0.078), with a larger anchor cost (E25).
 
 10. GLUE is at parity on four of five tasks; MRPC loses 0.022 in every
-    checkpoint (E26).
+    checkpoint (E26). With all of THINGS kept (share33) the MRPC loss is
+    -0.007 and not consistent (E28).
+
+11. A candidate alternative to the recommended configuration: pair-first
+    sampling over all of THINGS with two thirds of draws from SimVerb
+    (share66). SimLex Neither +0.160, All +0.110, MEN Neither +0.065, 3
+    seeds (E27). GLUE not yet run on it.
+
+| arm, all of THINGS, 3 seeds | SimVerb pairs per batch | SimLex All | SimLex Neither | MEN Neither | MRPC |
+|---|---|---|---|---|---|
+| pairs_full | 0.03 | -0.026 | +0.031 | +0.051 | |
+| share10 | 1.3 | -0.003 | +0.048 | +0.055 | |
+| share33 | 4.6 | +0.086 | +0.131 | +0.064 | -0.007 |
+| share66 | 10.5 | +0.110 | +0.160 | +0.065 | |
+| pairs (10k THINGS, 5 seeds) | 3.4 | +0.123 | +0.155 | +0.063 | |
+| recommended (10k THINGS, inflected, 5 seeds) | 7.4 | +0.144 | +0.188 | +0.032 | -0.022 |
 
 Every evaluation of the earlier configuration now has a recommended-
 configuration counterpart except the read-out and extended-training
@@ -608,6 +626,8 @@ heading given.
      reported sampling, is closer to relatedness.
 - **Results.** `results/men_transfer_main.csv`,
   `results/men_transfer_endpoint.csv`.
+- **Later note.** Conclusion 3 is withdrawn by E27: MEN holds as SimVerb
+  rises when all of THINGS is kept.
 
 ### E22. Stem check under the recommended configuration
 
@@ -682,6 +702,8 @@ heading given.
   recommended configuration and all of the Both verb gain. The THINGS cut is
   not needed; the SimVerb pairs are.
 - **Results.** `results/bert_continued_rsr_sup_{pairs_full,share33}_s{1,2,3}_*.csv`.
+- **Later note.** "Not their share" is revised by E27: with shares 0.10 and
+  0.66 added, the gain grows with the number of SimVerb pairs per batch.
 
 ### E25. GPT-2 under the recommended configuration
 
@@ -751,6 +773,122 @@ heading given.
      relative to vanilla, so both RSR and control sit below stock BERT there.
 - **Results.** `brain_and_glue/results/downstream_main_s{1,2,3}/downstream_results.json`.
 
+### E27. SimVerb share with all of THINGS
+
+- **Date.** 26 November 2026. Runner `experiments/runners/run_simverb_share.sh`,
+  steps `men_split`, `share{10,66}_s{1,2,3}`, `men_sweep`.
+- **Question.** E21 and E26 found two costs of the recommended configuration
+  (MEN halves, MRPC -0.022). share33 keeps all of THINGS. How does the gain
+  depend on the amount of SimVerb in the batches, and do the costs follow
+  SimVerb or the THINGS cut?
+- **Setup.** Pair-first sampling over all THINGS pairs, SimLex pairs
+  excluded, split sentences, `--simverb-share` 0.10 and 0.66, seeds 1 to 3,
+  RSR only, scored against the clean control of the same seed. With
+  pairs_full (share 0) and share33 (E24) this gives four points. MEN on all
+  four arms against the clean control, partitions from the 2,652-word
+  vocabulary (294 / 1,117 / 1,569).
+- **Result, SimLex.** RSR minus clean control, final step, 3 seeds; p paired
+  against the clean RSR arm:
+
+  | arm | SimVerb pairs per batch | THINGS pairs per batch | All | Both | One | Neither | Both V | Both N | Neither N | Neither A |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | pairs_full | 0.03 | 275 | -0.026 | -0.065 | -0.043 | +0.031 | +0.095 | -0.079 | +0.019 | +0.064 |
+  | share10 | 1.3 | 224 | -0.003 | -0.005 | -0.046 | +0.048 | +0.223 | -0.081 | +0.028 | +0.092 |
+  | share33 | 4.6 | 128 | +0.086 | +0.176 | -0.024 | +0.131 | +0.513 | -0.042 | +0.095 | +0.198 |
+  | share66 | 10.5 | 36 | **+0.110** | **+0.195** | -0.003 | **+0.160** | **+0.518** | -0.060 | +0.127 | +0.223 |
+
+  Neither per seed: share10 +0.046, +0.054, +0.043; share66 +0.163, +0.167,
+  +0.152. Against clean RSR: share10 Neither p = 0.45, Both V p < 0.001;
+  share66 Neither p = 0.004, All p = 0.015. share66 against share33: Neither
+  +0.029 (p = 0.027), Both V +0.005 (p = 0.73). MLM loss within 0.04 of the
+  control in every arm.
+- **Result, MEN.** RSR minus clean control, 3 seeds, one-sample p:
+
+  | arm | All | Both | One | Neither |
+  |---|---|---|---|---|
+  | pairs_full | +0.061 | +0.039 | +0.078 | +0.051 (p = 0.004) |
+  | share10 | +0.066 | +0.047 | +0.085 | +0.055 (p = 0.009) |
+  | share33 | +0.066 | +0.042 | +0.077 | +0.064 (p < 0.001) |
+  | share66 | +0.072 | +0.034 | +0.091 | +0.065 (p = 0.003) |
+  | recommended (E21, for reference) | +0.040 | +0.019 | +0.055 | +0.032 |
+
+- **Conclusions.**
+  1. The gain follows the number of SimVerb pairs per batch, not just their
+     presence. About one per batch moves the supervised verbs (Both V +0.22)
+     but not the unsupervised words; most of the Neither gain arrives by
+     about five per batch; doubling again adds +0.03. This revises E20
+     conclusion 4 and E24.
+  2. With all of THINGS kept, share66 reaches Neither +0.160 against +0.188
+     for the recommended configuration, without the THINGS cut or the
+     inflected forms.
+  3. MEN does not fall as SimVerb rises. It rises slightly, and share66, with
+     more SimVerb pairs per batch than the recommended configuration (10.5
+     against 7.4), keeps the MEN transfer of the reported sampling. The MEN
+     halving in E21 therefore comes from the 10k THINGS sample or the
+     inflected forms, not from SimVerb. E21 conclusion 3 is withdrawn. E29
+     separates the two.
+- **Results.** `results/bert_continued_rsr_sup_share{10,66}_s{1,2,3}_*.csv`,
+  `results/men_transfer_split.csv`, `results/men_transfer_sweep.csv`.
+
+### E28. GLUE on share33
+
+- **Date.** 26 November 2026. Steps `glue_share33_s{1,2,3}`.
+- **Question.** Does keeping all of THINGS avoid the MRPC cost of the
+  recommended configuration (E26)?
+- **Setup.** As E26, share33 RSR against the clean control, seeds 1 to 3, 3
+  fine-tuning seeds per checkpoint. Vanilla from E26.
+- **Result.** Mean over 3 checkpoints x 3 fine-tuning seeds; paired over
+  checkpoints:
+
+  | task | vanilla | control | RSR | RSR - control | per checkpoint | p | recommended (E26) |
+  |---|---|---|---|---|---|---|---|
+  | MRPC (acc) | 0.862 | 0.842 | 0.835 | -0.007 | -0.003, +0.000, -0.017 | 0.33 | -0.022 |
+  | RTE | 0.668 | 0.639 | 0.670 | +0.032 | +0.024, +0.048, +0.023 | 0.06 | +0.012 |
+  | CoLA | 0.575 | 0.562 | 0.571 | +0.009 | -0.009, +0.016, +0.019 | 0.44 | +0.010 |
+  | STS-B | 0.892 | 0.889 | 0.889 | -0.000 | | 0.99 | +0.001 |
+  | SST-2 | 0.928 | 0.924 | 0.926 | +0.002 | | 0.14 | +0.000 |
+
+  MRPC F1: control 0.890, RSR 0.886. 0 degenerate runs of 90.
+- **Conclusions.**
+  1. The MRPC cost is a third of its size and no longer consistent (one
+     checkpoint of three). share33 is at parity on every task.
+  2. Together with E27, both measured costs of the recommended configuration
+     track the THINGS cut (or the inflected forms), not the SimVerb pairs.
+  3. share66 was not run on GLUE. It is the arm to test next, since it is the
+     closest to the recommended configuration on SimLex.
+- **Results.** `brain_and_glue/results/downstream_share33_s{1,2,3}/downstream_results.json`.
+
+### E29. MEN on the pairs arm
+
+- **Date.** 26 November 2026. Step `men_pairs`.
+- **Question.** The recommended configuration differs from share33 and
+  share66 in two ways: the 10k THINGS sample and the inflected SimVerb forms.
+  Which one costs MEN?
+- **Setup.** E20 pairs checkpoints (10k THINGS, no inflection) against the
+  pairs control, seeds 1 to 5. Vocabulary 2,651 words, partitions 294 /
+  1,117 / 1,569. The pairs and clean controls are the same model (the control
+  does not use the RSR sampler); their MEN scores agree to four decimals.
+- **Result.** RSR minus control, 5 seeds, one-sample p:
+
+  | arm | All | Both | One | Neither |
+  |---|---|---|---|---|
+  | pairs (10k THINGS) | +0.065 (p = 1e-4) | +0.020 (p = 0.035) | +0.080 (p = 7e-5) | +0.063 (p = 9e-5) |
+  | inflect (E21) | +0.040 | +0.019 | +0.055 | +0.032 |
+
+  Neither per seed: +0.069, +0.074, +0.059, +0.054, +0.057. All is the same
+  2,980 pairs in both rows and the control is shared, so the 0.025 drop on
+  All is a direct comparison of the two RSR arms.
+- **Conclusions.**
+  1. The 10k THINGS sample does not cost MEN. The inflected SimVerb forms do:
+     they add 0.033 on SimLex Neither (E20) and take 0.025 off MEN All and
+     about 0.03 off MEN Neither.
+  2. Part of the Neither drop in E21 may be the partition: inflection doubles
+     the vocabulary, so the Neither set changes. The All row has no such
+     caveat.
+  3. Whether the MRPC cost (E26) also comes from the inflections is not yet
+     known; GLUE on the pairs arm would settle it.
+- **Results.** `results/men_transfer_pairs.csv`.
+
 ---
 
 ## 5. Corrections and retracted claims
@@ -766,6 +904,8 @@ heading given.
 | The all-pairs collapse at 5e-5 reproduces the original | not the same phenomenon; absent at 1e-5 | E07 |
 | "Template training produces a worse model" | BERT only | E12, E17 |
 | The original real-sentence collapse is an evaluation artefact | rejected | E12 |
+| The gain follows the presence of SimVerb pairs, not their share | revised: it grows with SimVerb pairs per batch, little below one, most by about five | E24, E27 |
+| More SimVerb trades relatedness (MEN) for similarity | withdrawn: MEN holds at 10.5 SimVerb pairs per batch with all of THINGS, and with the 10k THINGS sample; the MEN cost comes from the inflected forms | E21, E27, E29 |
 
 ---
 
@@ -773,14 +913,15 @@ heading given.
 
 Highest priority first.
 
-1. **A sweep of SimVerb share** (or fixed SimVerb pairs per batch) with all
-   of THINGS, to pin down what amount of verb supervision is needed, scored
-   on SimLex and MEN together (E21 suggests a trade). Seeds for pairs_full
-   and share33 done (E24).
-2. **The costs of the recommended configuration.** MEN halves in BERT (E21)
-   and MRPC drops 0.022 (E26). Score share33 (all of THINGS, a third
-   SimVerb) on MEN and MRPC to see whether keeping THINGS avoids either cost
-   while keeping most of the SimLex gain.
+1. **Choose the configuration to report.** The inflected forms buy +0.033
+   on SimLex Neither and cost about 0.03 on MEN (E29). Candidates without
+   them: pairs (10k THINGS, Neither +0.155) and share66 (all THINGS,
+   +0.160), both with the full MEN transfer. GLUE on pairs (already trained)
+   locates the MRPC cost; GLUE on share66 completes its profile. About 3.5
+   hours each.
+2. **Why the inflected forms cost MEN.** They double the vocabulary with
+   forms rated by copying the base pair's score; check whether the cost
+   follows the number of inflected pairs per batch.
 3. **GPT-2 anchor cost.** CLM loss rises 0.29 above the control under the
    recommended configuration (E25). Check perplexity on held-out text, or
    a downstream task, before claiming no damage for GPT-2.
